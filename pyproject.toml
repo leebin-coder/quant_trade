@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "quant-trade"
 version = "0.1.0"
-description = "A quantitative trading system with FastAPI"
+description = "A quantitative trading system"
 authors = [
     {name = "Your Name", email = "your.email@example.com"}
 ]
@@ -13,19 +13,9 @@ license = {text = "MIT"}
 readme = "README.md"
 requires-python = ">=3.8"
 dependencies = [
-    # Web Framework
-    "fastapi>=0.104.1",
-    "uvicorn[standard]>=0.24.0",
-
     # Data Validation & Settings
     "pydantic>=2.5.0",
     "pydantic-settings>=2.1.0",
-
-    # Database - 修复 Python 3.13 兼容性问题
-    "sqlalchemy[asyncio]>=2.0.23",
-    "asyncpg>=0.29.0; python_version < '3.13'",
-    "psycopg2-binary>=2.9.0; python_version >= '3.13'",  # 为 Python 3.13 添加备选
-    "alembic>=1.12.0",
 
     # Data Processing
     "pandas>=2.0.0",
@@ -53,8 +43,6 @@ dev = [
 
 prod = [
     # 生产环境特定依赖
-    "gunicorn>=21.0.0",
-    "psycopg2-binary>=2.9.0",  # 确保生产环境也有备选驱动
 ]
 
 # 其余配置保持不变...

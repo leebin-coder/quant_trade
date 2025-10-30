@@ -1,236 +1,312 @@
- Quant Trade - 专业量化交易系统
+# Quant Trade - 量化交易服务框架
 
 ![Python](https://img.shields.io/badge/Python-3.8%2B-blue)
-![FastAPI](https://img.shields.io/badge/FastAPI-0.104%2B-green)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-13%2B-blue)
 ![License](https://img.shields.io/badge/License-MIT-yellow)
 
-一个基于 FastAPI 和 AsyncSQLAlchemy 构建的专业量化交易系统，采用领域驱动设计(DDD)和清洁架构，支持多市场数据采集、策略回测和自动交易执行。
+一个轻量级的量化交易服务框架，采用异步架构，支持作为持续运行的后台服务。
 
-## 🚀 核心特性
+## 🚀 特性
 
-### 📊 数据管理
-- **多数据源支持**：集成 AKShare、YFinance 等数据提供商
-- **异步数据采集**：高性能异步数据获取和存储
-- **历史数据管理**：完整的股票、期货历史数据存储
-- **实时行情**：支持实时行情数据订阅和推送
-
-### 🤖 策略引擎
-- **策略框架**：灵活的策略开发和回测框架
-- **多策略支持**：趋势跟踪、均值回归、因子模型等
-- **回测系统**：完整的策略回测和绩效分析
-- **实时监控**：策略运行状态实时监控
-
-### 🔄 交易执行
-- **多券商支持**：模拟交易和实盘交易接口
-- **风险控制**：多层次风险管理和资金管理
-- **订单管理**：完整的订单生命周期管理
-- **执行算法**：智能订单执行算法
-
-### 🏗️ 系统架构
-- **领域驱动设计**：清晰的分层架构和领域模型
-- **异步架构**：基于 AsyncSQLAlchemy 的高性能异步处理
-- **微服务就绪**：支持容器化部署和水平扩展
-- **API 优先**：完整的 RESTful API 设计
+- **轻量级框架** - 最小化依赖，专注核心功能
+- **服务架构** - 支持作为后台服务持续运行
+- **异步设计** - 基于 asyncio 的异步任务调度
+- **灵活配置** - 通过环境变量灵活配置
+- **多种部署方式** - 支持直接运行、systemd、supervisor、Docker 等
 
 ## 🛠️ 技术栈
 
-### 后端框架
-- **FastAPI** - 高性能异步 Web 框架
-- **SQLAlchemy 2.0** - 异步 ORM
-- **Pydantic** - 数据验证和设置管理
-- **Alembic** - 数据库迁移
-
-### 数据库
-- **PostgreSQL** - 主数据库
-- **Redis** - 缓存和消息队列
-
-### 量化分析
-- **Pandas** - 数据分析
-- **NumPy** - 数值计算
-- **TA-Lib** - 技术指标计算
-
-### 部署运维
-- **Docker** - 容器化部署
-- **Docker Compose** - 服务编排
-- **Uvicorn** - ASGI 服务器
+- **Python 3.8+** - 核心语言
+- **asyncio** - 异步编程
+- **Pydantic** - 配置管理和数据验证
+- **Pandas / NumPy** - 数据分析
 
 ## 📁 项目结构
-quant_trade/
-├── app/ # 主应用目录
-│ ├── api/ # API 表现层
-│ │ └── routes/ # API 路由
-│ ├── core/ # 核心配置
-│ ├── domain/ # 领域层
-│ │ ├── entities/ # 领域实体
-│ │ └── services/ # 领域服务
-│ ├── infrastructure/ # 基础设施层
-│ │ ├── database/ # 数据库
-│ │ ├── external/ # 外部服务
-│ │ └── message_bus/ # 消息总线
-│ ├── application/ # 应用层
-│ │ ├── use_cases/ # 应用用例
-│ │ └── schedulers/ # 任务调度
-│ ├── strategies/ # 交易策略
-│ └── utils/ # 工具函数
-├── tests/ # 测试目录
-├── scripts/ # 部署脚本
-├── docker/ # Docker 配置
-└── docs/ # 项目文档
 
-text
+```
+quant_trade/
+├── app/                        # 应用主目录
+│   ├── __init__.py
+│   ├── main.py                 # 服务入口
+│   ├── core/                   # 核心模块
+│   │   ├── __init__.py
+│   │   └── config.py           # 配置管理
+│   └── utils/                  # 工具模块
+│       ├── __init__.py
+│       └── logger.py           # 日志工具
+├── scripts/                    # 脚本目录
+│   ├── service_manager.py      # 服务管理脚本
+│   └── README.md
+├── deployment/                 # 部署配置
+│   ├── quant-trade.service     # systemd 配置
+│   ├── supervisor.conf         # supervisor 配置
+│   ├── com.quanttrade.service.plist  # launchd 配置 (macOS)
+│   └── README.md
+├── logs/                       # 日志目录
+├── .env                        # 环境变量配置
+├── .env.example                # 环境变量示例
+├── pyproject.toml              # 项目配置
+├── Dockerfile                  # Docker 镜像
+├── docker-compose.yml          # Docker Compose
+├── QUICKSTART.md               # 快速启动指南
+└── README.md                   # 项目说明
+```
 
 ## ⚡ 快速开始
 
-### 环境要求
+### 1. 环境要求
 
 - Python 3.8+
-- PostgreSQL 13+
-- Redis 6+
 
-### 安装步骤
+### 2. 安装
 
-1. **克隆项目**
 ```bash
-git clone https://github.com/leebin-coder/quant_trade.git
+# 克隆项目
+git clone https://github.com/yourusername/quant_trade.git
 cd quant_trade
-创建虚拟环境
 
-bash
-python -m venv venv
-source venv/bin/activate  # Linux/Mac
-# venv\Scripts\activate  # Windows
-安装依赖
+# 安装依赖
+pip install -e .
 
-bash
-pip install -r requirements/base.txt
-环境配置
+# 或安装开发依赖
+pip install -e ".[dev]"
+```
 
-bash
+### 3. 配置
+
+```bash
+# 复制环境变量模板
 cp .env.example .env
-# 编辑 .env 文件，配置数据库连接等信息
-启动服务
 
-bash
+# 编辑配置
+nano .env
+```
+
+主要配置项：
+
+```bash
+# 项目信息
+PROJECT_NAME="Quant Trade"
+VERSION="1.0.0"
+
+# 交易配置
+TRADING_ENABLED=false        # 是否启用交易
+SIMULATION_MODE=true         # 模拟模式
+
+# 数据源
+DATA_PROVIDER=akshare        # 数据提供者
+
+# 日志级别
+LOG_LEVEL=INFO
+
+# 调度间隔（秒）
+MARKET_MONITOR_INTERVAL=60          # 市场监控间隔
+STRATEGY_EXECUTION_INTERVAL=300     # 策略执行间隔
+HEALTH_CHECK_INTERVAL=30            # 健康检查间隔
+```
+
+### 4. 启动服务
+
+#### 方式 1: 使用服务管理脚本（推荐）
+
+```bash
+# 启动服务
+python scripts/service_manager.py start
+
+# 查看状态
+python scripts/service_manager.py status
+
+# 查看日志
+python scripts/service_manager.py logs
+
+# 停止服务
+python scripts/service_manager.py stop
+
+# 重启服务
+python scripts/service_manager.py restart
+```
+
+#### 方式 2: 直接运行
+
+```bash
+# 前台运行
 python -m app.main
-服务启动后访问：
 
-主页: http://localhost:8000
+# 后台运行
+nohup python -m app.main > logs/service.log 2>&1 &
+```
 
-API文档: http://localhost:8000/docs
+#### 方式 3: 使用 Docker
 
-健康检查: http://localhost:8000/api/health/health
+```bash
+# 构建并启动
+docker-compose up -d
 
-Docker 部署
-bash
-# 使用 Docker Compose 启动所有服务
-docker-compose -f docker/docker-compose.yml up -d
+# 查看日志
+docker-compose logs -f
 
-# 查看服务状态
-docker-compose -f docker/docker-compose.yml ps
-📚 使用指南
-数据管理
-bash
-# 获取股票列表
-curl http://localhost:8000/api/data/stocks
+# 停止
+docker-compose down
+```
 
-# 更新股票数据
-curl -X POST http://localhost:8000/api/data/update/stocks
-策略回测
-bash
-# 回测趋势跟踪策略
-curl -X POST http://localhost:8000/api/strategies/backtest/trend_following \
-  -H "Content-Type: application/json" \
-  -d '{
-    "symbols": ["000001", "000002"],
-    "start_date": "2023-01-01",
-    "end_date": "2023-12-31"
-  }'
-交易执行
-bash
-# 获取交易状态
-curl http://localhost:8000/api/trading/status
+### 5. 验证
 
-# 提交订单
-curl -X POST http://localhost:8000/api/trading/orders \
-  -H "Content-Type: application/json" \
-  -d '{
-    "symbol": "000001",
-    "side": "BUY",
-    "quantity": 100,
-    "order_type": "MARKET"
-  }'
-🔧 开发指南
-添加新的数据源
-在 app/infrastructure/external/data_providers/ 创建新的数据提供者
+查看日志确认服务启动：
 
-实现 BaseDataProvider 接口
+```bash
+tail -f logs/service.log
+```
 
-在领域服务中集成新的数据源
+你应该看到：
 
-开发交易策略
-在 app/strategies/ 创建策略类
+```
+============================================================
+🚀 Quant Trade 服务启动
+📊 模拟模式: True
+🔄 交易启用: False
+============================================================
+📈 市场监控任务已启动
+🎯 策略执行任务已启动
+💚 健康检查任务已启动
+```
 
-继承 BaseStrategy 基类
+## 📚 详细文档
 
-实现 calculate_signals 和 backtest 方法
+- [快速启动指南](QUICKSTART.md) - 详细的启动步骤
+- [部署文档](deployment/README.md) - 各种部署方式说明
+- [脚本文档](scripts/README.md) - 服务管理脚本使用
 
-数据库迁移
-bash
-# 生成迁移脚本
-alembic revision --autogenerate -m "描述"
+## 🔧 开发指南
 
-# 执行迁移
-alembic upgrade head
-🤝 贡献指南
-我们欢迎各种形式的贡献！请阅读我们的贡献指南：
+### 服务架构
 
-Fork 本仓库
+服务包含三个主要的异步任务循环：
 
-创建特性分支 (git checkout -b feature/AmazingFeature)
+1. **市场监控循环** (`_market_monitor_loop`)
+   - 定时获取市场数据
+   - 监控市场状态
+   - 可配置执行间隔
 
-提交更改 (git commit -m 'Add some AmazingFeature')
+2. **策略执行循环** (`_strategy_execution_loop`)
+   - 运行交易策略
+   - 生成交易信号
+   - 执行交易指令
 
-推送到分支 (git push origin feature/AmazingFeature)
+3. **健康检查循环** (`_health_check_loop`)
+   - 检查系统状态
+   - 监控服务健康度
 
-开启一个 Pull Request
+### 添加业务逻辑
 
-📄 许可证
-本项目采用 MIT 许可证 - 查看 LICENSE 文件了解详情。
+在 `app/main.py` 中的对应方法添加你的业务逻辑：
 
-🛣️ 开发路线图
-完善数据采集模块
+```python
+async def _market_monitor_loop(self):
+    """在这里添加市场监控逻辑"""
+    while self.running:
+        # 你的代码
+        await asyncio.sleep(settings.market_monitor_interval)
 
-实现基础策略框架
+async def _strategy_execution_loop(self):
+    """在这里添加策略执行逻辑"""
+    while self.running:
+        # 你的代码
+        await asyncio.sleep(settings.strategy_execution_interval)
+```
 
-开发回测引擎
+### 添加新模块
 
-集成实盘交易接口
+项目结构简洁，你可以根据需要添加：
 
-添加风险管理模块
+```bash
+app/
+├── strategies/       # 交易策略
+├── data/            # 数据处理
+├── brokers/         # 经纪商接口
+└── ...              # 其他模块
+```
 
-实现用户管理和权限控制
+## 🚀 生产部署
 
-开发 Web 管理界面
+### systemd (Linux)
 
-支持分布式部署
+```bash
+sudo cp deployment/quant-trade.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable quant-trade
+sudo systemctl start quant-trade
+```
 
-📞 联系我们
-项目主页: https://github.com/leebin-coder/quant_trade
+### Supervisor
 
-问题反馈: GitHub Issues
+```bash
+sudo cp deployment/supervisor.conf /etc/supervisor/conf.d/quant-trade.conf
+sudo supervisorctl reread
+sudo supervisorctl update
+sudo supervisorctl start quant-trade
+```
 
-🙏 致谢
-感谢以下开源项目的贡献：
+### launchd (macOS)
 
-FastAPI
+```bash
+cp deployment/com.quanttrade.service.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.quanttrade.service.plist
+launchctl start com.quanttrade.service
+```
 
-SQLAlchemy
+详见 [deployment/README.md](deployment/README.md)
 
-AKShare
+## 🛠️ 常见问题
 
-Pandas
+### 服务无法启动
 
-⭐ 如果这个项目对你有帮助，请给它一个星星！
+1. 检查 Python 环境：`which python3`
+2. 检查依赖安装：`pip list`
+3. 查看详细错误：`python -m app.main`
 
-注意：本项目仍在积极开发中，API 可能会发生变化。建议在生产环境使用前进行充分测试。
+### 权限错误
+
+```bash
+chmod +x scripts/service_manager.py
+chmod +x app/main.py
+```
+
+### 查看日志
+
+```bash
+# 实时查看
+tail -f logs/service.log
+
+# 查看最近的日志
+python scripts/service_manager.py logs
+```
+
+## 🤝 贡献
+
+欢迎贡献代码、报告问题或提出建议！
+
+1. Fork 本仓库
+2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
+3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
+4. 推送到分支 (`git push origin feature/AmazingFeature`)
+5. 开启 Pull Request
+
+## 📄 许可证
+
+本项目采用 MIT 许可证 - 查看 [LICENSE](LICENSE) 文件了解详情
+
+## 🛣️ 开发计划
+
+- [ ] 数据采集模块
+- [ ] 策略框架
+- [ ] 回测引擎
+- [ ] 风险管理
+- [ ] 实盘交易接口
+- [ ] Web 管理界面
+
+## ⭐ Star History
+
+如果这个项目对你有帮助，请给它一个星星！
+
+---
+
+**注意**：这是一个基础框架，需要根据实际业务需求添加具体的交易逻辑。

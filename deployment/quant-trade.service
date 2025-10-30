@@ -1,0 +1,29 @@
+[Unit]
+Description=Quant Trade - 量化交易系统服务
+After=network.target
+
+[Service]
+Type=simple
+User=libin
+Group=staff
+WorkingDirectory=/Users/libin/Projects/quant_trade
+Environment="PATH=/usr/local/bin:/usr/bin:/bin"
+Environment="PYTHONUNBUFFERED=1"
+
+# 从环境文件加载配置
+EnvironmentFile=/Users/libin/Projects/quant_trade/.env
+
+# 启动命令
+ExecStart=/usr/bin/python3 -m app.main
+
+# 重启策略
+Restart=on-failure
+RestartSec=10
+
+# 日志
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=quant-trade
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  quant-trade:
+    build: .
+    container_name: quant-trade
+    restart: unless-stopped
+
+    # 环境变量
+    env_file:
+      - .env
+
+    # 挂载卷
+    volumes:
+      - ./logs:/app/logs
+      - ./.env:/app/.env
+
+    # 资源限制
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+    # 日志配置
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # 网络模式
+    network_mode: bridge
+
+# 可选：如果需要持久化存储
+# volumes:
+#   quant_data:
+#     driver: local
