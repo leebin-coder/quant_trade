@@ -46,10 +46,10 @@ prod = [
 ]
 
 # 其余配置保持不变...
-[project.urls]
-"Homepage" = "https://github.com/yourusername/quant-trade"
-"Documentation" = "https://github.com/yourusername/quant-trade/docs"
-"Repository" = "https://github.com/yourusername/quant-trade"
+# [project.urls]
+# "Homepage" = "https://github.com/yourusername/quant-trade"
+# "Documentation" = "https://github.com/yourusername/quant-trade/docs"
+# "Repository" = "https://github.com/yourusername/quant-trade"
 
 [tool.setuptools.packages.find]
 where = ["."]
@@ -70,7 +70,6 @@ extend-exclude = '''
   | \.venv
   | build
   | dist
-  | migrations
 )/
 '''
 
@@ -80,14 +79,14 @@ multi_line_output = 3
 line_length = 88
 known_first_party = ["app"]
 
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-asyncio_mode = "auto"
-addopts = [
-    "--verbose",
-    "--strict-markers",
-    "--strict-config",
-    "--cov=app",
-    "--cov-report=term-missing",
-    "--cov-report=html"
-]
+# [tool.pytest.ini_options]
+# testpaths = ["tests"]
+# asyncio_mode = "auto"
+# addopts = [
+#     "--verbose",
+#     "--strict-markers",
+#     "--strict-config",
+#     "--cov=app",
+#     "--cov-report=term-missing",
+#     "--cov-report=html"
+# ]
