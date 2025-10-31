@@ -9,6 +9,7 @@ import sys
 from datetime import datetime
 from app.utils.logger import logger
 from app.core.config import settings
+from app.tasks.stock_data_fetcher import StockDataFetcher
 
 
 class TradingService:
@@ -17,6 +18,7 @@ class TradingService:
     def __init__(self):
         self.running = False
         self.tasks = []
+        self.stock_fetcher = StockDataFetcher()
         logger.info(f"初始化 {settings.project_name} v{settings.version}")
 
     async def start(self):
@@ -36,6 +38,7 @@ class TradingService:
             asyncio.create_task(self._market_monitor_loop()),
             asyncio.create_task(self._strategy_execution_loop()),
             asyncio.create_task(self._health_check_loop()),
+            asyncio.create_task(self._stock_data_fetch_loop()),
         ]
 
         try:
@@ -137,6 +140,35 @@ class TradingService:
             except Exception as e:
                 logger.error(f"健康检查出错: {e}", exc_info=True)
                 await asyncio.sleep(30)
+
+    async def _stock_data_fetch_loop(self):
+        """股票数据获取循环 - 每8小时执行一次"""
+        logger.info("📊 股票数据获取任务已启动")
+        logger.info(f"执行间隔: {settings.stock_fetch_interval}秒 (即 {settings.stock_fetch_interval/3600}小时)")
+
+        # 启动时立即执行一次
+        try:
+            logger.info("首次执行股票数据同步任务...")
+            await self.stock_fetcher.fetch_all_stock_info()
+        except Exception as e:
+            logger.error(f"首次股票数据获取失败: {e}", exc_info=True)
+
+        while self.running:
+            try:
+                # 等待指定的时间间隔
+                await asyncio.sleep(settings.stock_fetch_interval)
+
+                # 执行股票数据同步任务
+                logger.info("触发定时股票数据同步任务...")
+                await self.stock_fetcher.fetch_all_stock_info()
+
+            except asyncio.CancelledError:
+                logger.info("股票数据获取任务已取消")
+                break
+            except Exception as e:
+                logger.error(f"股票数据获取出错: {e}", exc_info=True)
+                # 发生错误后等待一段时间再重试，避免错误循环
+                await asyncio.sleep(300)  # 5分钟后重试
 
 
 async def main():

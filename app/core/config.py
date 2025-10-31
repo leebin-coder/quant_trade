@@ -17,6 +17,12 @@ class Settings(BaseSettings):
     # 数据源配置
     data_provider: str = Field("akshare", env="DATA_PROVIDER")  # akshare, yfinance
 
+    # 股票API配置
+    stock_api_host: str = Field("localhost", env="STOCK_API_HOST")
+    stock_api_port: int = Field(8084, env="STOCK_API_PORT")
+    stock_fetch_interval: int = Field(28800, env="STOCK_FETCH_INTERVAL")  # 8小时 = 28800秒
+    stock_batch_size: int = Field(1000, env="STOCK_BATCH_SIZE")  # 批量插入每批数量
+
     # 日志配置
     log_level: str = Field("INFO", env="LOG_LEVEL")
 
