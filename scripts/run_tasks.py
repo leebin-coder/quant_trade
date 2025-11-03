@@ -1,0 +1,135 @@
+#!/usr/bin/env python3
+"""
+手动启动调度任务脚本
+提供所有调度任务的手动执行入口
+"""
+import asyncio
+import sys
+from datetime import datetime
+from pathlib import Path
+
+# 添加项目根目录到路径
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
+
+from app.tasks.stock_data_fetcher import StockDataFetcher
+from app.utils.logger import logger
+
+
+class TaskRunner:
+    """任务运行器"""
+
+    def __init__(self):
+        self.stock_fetcher = StockDataFetcher()
+
+    async def run_stock_sync(self):
+        """
+        运行股票基本信息同步任务
+        同步A股股票基本信息到数据库
+        """
+        logger.info("=" * 80)
+        logger.info("手动执行：股票基本信息同步任务")
+        logger.info(f"开始时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        logger.info("=" * 80)
+
+        try:
+            await self.stock_fetcher.fetch_all_stock_info()
+            logger.info("\n✅ 股票基本信息同步任务执行成功！")
+        except Exception as e:
+            logger.error(f"\n❌ 股票基本信息同步任务执行失败: {e}", exc_info=True)
+            return False
+
+        return True
+
+    async def run_stock_update(self):
+        """
+        运行股票详细信息更新任务
+        更新股价、市值等详细信息
+        """
+        logger.info("=" * 80)
+        logger.info("手动执行：股票详细信息更新任务")
+        logger.info(f"开始时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        logger.info("=" * 80)
+
+        try:
+            await self.stock_fetcher.update_all_stock_details()
+            logger.info("\n✅ 股票详细信息更新任务执行成功！")
+        except Exception as e:
+            logger.error(f"\n❌ 股票详细信息更新任务执行失败: {e}", exc_info=True)
+            return False
+
+        return True
+
+
+def print_menu():
+    """打印菜单"""
+    print("\n" + "=" * 60)
+    print("📋 调度任务手动执行菜单")
+    print("=" * 60)
+    print("1. 执行股票基本信息同步任务")
+    print("   - 从数据源获取A股股票列表")
+    print("   - 比对数据库，插入新股票")
+    print("   - 更新所有股票的详细信息")
+    print()
+    print("2. 仅执行股票详细信息更新任务")
+    print("   - 获取每只股票的最新股价、市值等信息")
+    print("   - 比对数据库，更新变化的字段")
+    print()
+    print("0. 退出")
+    print("=" * 60)
+
+
+async def main():
+    """主函数"""
+    runner = TaskRunner()
+
+    while True:
+        print_menu()
+        choice = input("请选择要执行的任务 (0-2): ").strip()
+
+        if choice == "0":
+            logger.info("退出任务运行器")
+            break
+        elif choice == "1":
+            confirm = input("\n确认执行股票基本信息同步任务？(y/n): ").strip().lower()
+            if confirm == "y":
+                start_time = datetime.now()
+                success = await runner.run_stock_sync()
+                end_time = datetime.now()
+                duration = (end_time - start_time).total_seconds()
+
+                if success:
+                    logger.info(f"\n⏱️  任务执行耗时: {duration:.2f} 秒")
+                else:
+                    logger.error(f"\n⏱️  任务执行失败，耗时: {duration:.2f} 秒")
+            else:
+                logger.info("取消执行")
+        elif choice == "2":
+            confirm = input("\n确认执行股票详细信息更新任务？(y/n): ").strip().lower()
+            if confirm == "y":
+                start_time = datetime.now()
+                success = await runner.run_stock_update()
+                end_time = datetime.now()
+                duration = (end_time - start_time).total_seconds()
+
+                if success:
+                    logger.info(f"\n⏱️  任务执行耗时: {duration:.2f} 秒")
+                else:
+                    logger.error(f"\n⏱️  任务执行失败，耗时: {duration:.2f} 秒")
+            else:
+                logger.info("取消执行")
+        else:
+            print("❌ 无效的选择，请重新输入")
+
+        input("\n按回车键继续...")
+
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("\n程序被用户中断")
+        sys.exit(0)
+    except Exception as e:
+        logger.error(f"\n程序异常退出: {e}", exc_info=True)
+        sys.exit(1)

@@ -7,6 +7,8 @@ import asyncio
 import signal
 import sys
 from datetime import datetime
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 from app.utils.logger import logger
 from app.core.config import settings
 from app.tasks.stock_data_fetcher import StockDataFetcher
@@ -19,6 +21,7 @@ class TradingService:
         self.running = False
         self.tasks = []
         self.stock_fetcher = StockDataFetcher()
+        self.scheduler = AsyncIOScheduler()
         logger.info(f"初始化 {settings.project_name} v{settings.version}")
 
     async def start(self):
@@ -50,6 +53,11 @@ class TradingService:
         """停止服务"""
         logger.info("正在停止服务...")
         self.running = False
+
+        # 关闭调度器
+        if self.scheduler.running:
+            logger.info("正在关闭调度器...")
+            self.scheduler.shutdown(wait=False)
 
         # 取消所有任务
         for task in self.tasks:
@@ -141,34 +149,54 @@ class TradingService:
                 logger.error(f"健康检查出错: {e}", exc_info=True)
                 await asyncio.sleep(30)
 
-    async def _stock_data_fetch_loop(self):
-        """股票数据获取循环 - 每8小时执行一次"""
-        logger.info("📊 股票数据获取任务已启动")
-        logger.info(f"执行间隔: {settings.stock_fetch_interval}秒 (即 {settings.stock_fetch_interval/3600}小时)")
+    async def _stock_data_fetch_task(self):
+        """股票数据获取任务 - 由调度器触发"""
+        try:
+            logger.info("触发定时股票数据同步任务...")
+            await self.stock_fetcher.fetch_all_stock_info()
+        except Exception as e:
+            logger.error(f"股票数据获取出错: {e}", exc_info=True)
 
-        # 启动时立即执行一次
+    async def _stock_data_fetch_loop(self):
+        """股票数据获取调度器 - 每个工作日下午3:30执行"""
+        logger.info("📊 股票数据获取任务已启动")
+        logger.info(f"调度时间: 每个工作日 {settings.stock_fetch_schedule_hour}:{settings.stock_fetch_schedule_minute:02d}")
+
+        # 配置 cron 触发器：每个工作日（周一到周五）下午3:30执行
+        trigger = CronTrigger(
+            day_of_week=settings.stock_fetch_schedule_day_of_week,
+            hour=settings.stock_fetch_schedule_hour,
+            minute=settings.stock_fetch_schedule_minute
+        )
+
+        # 添加调度任务
+        self.scheduler.add_job(
+            self._stock_data_fetch_task,
+            trigger=trigger,
+            id="stock_data_fetch",
+            name="股票数据获取任务",
+            replace_existing=True
+        )
+
+        # 启动调度器
+        self.scheduler.start()
+        logger.info("✓ 调度器已启动")
+
+        # 启动时立即执行一次（可选）
         try:
             logger.info("首次执行股票数据同步任务...")
             await self.stock_fetcher.fetch_all_stock_info()
         except Exception as e:
             logger.error(f"首次股票数据获取失败: {e}", exc_info=True)
 
-        while self.running:
-            try:
-                # 等待指定的时间间隔
-                await asyncio.sleep(settings.stock_fetch_interval)
-
-                # 执行股票数据同步任务
-                logger.info("触发定时股票数据同步任务...")
-                await self.stock_fetcher.fetch_all_stock_info()
-
-            except asyncio.CancelledError:
-                logger.info("股票数据获取任务已取消")
-                break
-            except Exception as e:
-                logger.error(f"股票数据获取出错: {e}", exc_info=True)
-                # 发生错误后等待一段时间再重试，避免错误循环
-                await asyncio.sleep(300)  # 5分钟后重试
+        # 保持任务运行，等待取消
+        try:
+            while self.running:
+                await asyncio.sleep(60)  # 每分钟检查一次运行状态
+        except asyncio.CancelledError:
+            logger.info("股票数据获取调度器已取消")
+            self.scheduler.shutdown()
+            raise
 
 
 async def main():
