@@ -158,11 +158,11 @@ class TradingService:
             logger.error(f"股票数据获取出错: {e}", exc_info=True)
 
     async def _stock_data_fetch_loop(self):
-        """股票数据获取调度器 - 每个工作日下午3:30执行"""
+        """股票数据获取调度器 - 每天凌晨0:00执行"""
         logger.info("📊 股票数据获取任务已启动")
-        logger.info(f"调度时间: 每个工作日 {settings.stock_fetch_schedule_hour}:{settings.stock_fetch_schedule_minute:02d}")
+        logger.info(f"调度时间: 每天 {settings.stock_fetch_schedule_hour:02d}:{settings.stock_fetch_schedule_minute:02d}")
 
-        # 配置 cron 触发器：每个工作日（周一到周五）下午3:30执行
+        # 配置 cron 触发器：每天凌晨0:00执行
         trigger = CronTrigger(
             day_of_week=settings.stock_fetch_schedule_day_of_week,
             hour=settings.stock_fetch_schedule_hour,
@@ -180,14 +180,7 @@ class TradingService:
 
         # 启动调度器
         self.scheduler.start()
-        logger.info("✓ 调度器已启动")
-
-        # 启动时立即执行一次（可选）
-        try:
-            logger.info("首次执行股票数据同步任务...")
-            await self.stock_fetcher.fetch_all_stock_info()
-        except Exception as e:
-            logger.error(f"首次股票数据获取失败: {e}", exc_info=True)
+        logger.info("✓ 调度器已启动，等待定时任务触发...")
 
         # 保持任务运行，等待取消
         try:
