@@ -37,6 +37,11 @@ class Settings(BaseSettings):
     stock_fetch_schedule_minute: int = Field(0, env="STOCK_FETCH_SCHEDULE_MINUTE")  # 分钟
     stock_fetch_schedule_day_of_week: str = Field("*", env="STOCK_FETCH_SCHEDULE_DAY_OF_WEEK")  # 每天
 
+    # 公司信息获取调度配置（每周末凌晨1:00执行）
+    company_fetch_schedule_hour: int = Field(1, env="COMPANY_FETCH_SCHEDULE_HOUR")  # 小时（24小时制）
+    company_fetch_schedule_minute: int = Field(0, env="COMPANY_FETCH_SCHEDULE_MINUTE")  # 分钟
+    company_fetch_schedule_day_of_week: str = Field("sat,sun", env="COMPANY_FETCH_SCHEDULE_DAY_OF_WEEK")  # 周末
+
     # 日志配置
     log_level: str = Field("INFO", env="LOG_LEVEL")
 

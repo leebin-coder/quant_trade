@@ -42,6 +42,7 @@ class TradingService:
             asyncio.create_task(self._strategy_execution_loop()),
             asyncio.create_task(self._health_check_loop()),
             asyncio.create_task(self._stock_data_fetch_loop()),
+            asyncio.create_task(self._company_data_fetch_loop()),
         ]
 
         try:
@@ -189,6 +190,45 @@ class TradingService:
         except asyncio.CancelledError:
             logger.info("股票数据获取调度器已取消")
             self.scheduler.shutdown()
+            raise
+
+    async def _company_data_fetch_task(self):
+        """公司数据获取任务 - 由调度器触发"""
+        try:
+            logger.info("触发定时公司数据同步任务...")
+            await self.stock_fetcher.fetch_all_company_info()
+        except Exception as e:
+            logger.error(f"公司数据获取出错: {e}", exc_info=True)
+
+    async def _company_data_fetch_loop(self):
+        """公司数据获取调度器 - 每周末凌晨1:00执行"""
+        logger.info("🏢 公司数据获取任务已启动")
+        logger.info(f"调度时间: 每周末 {settings.company_fetch_schedule_hour:02d}:{settings.company_fetch_schedule_minute:02d}")
+
+        # 配置 cron 触发器：每周末凌晨1:00执行
+        trigger = CronTrigger(
+            day_of_week=settings.company_fetch_schedule_day_of_week,
+            hour=settings.company_fetch_schedule_hour,
+            minute=settings.company_fetch_schedule_minute
+        )
+
+        # 添加调度任务
+        self.scheduler.add_job(
+            self._company_data_fetch_task,
+            trigger=trigger,
+            id="company_data_fetch",
+            name="公司数据获取任务",
+            replace_existing=True
+        )
+
+        logger.info("✓ 公司数据获取调度已添加，等待定时任务触发...")
+
+        # 保持任务运行，等待取消
+        try:
+            while self.running:
+                await asyncio.sleep(60)  # 每分钟检查一次运行状态
+        except asyncio.CancelledError:
+            logger.info("公司数据获取调度器已取消")
             raise
 
 
