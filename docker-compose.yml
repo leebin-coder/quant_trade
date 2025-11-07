@@ -3,7 +3,7 @@ version: '3.8'
 services:
   quant-trade:
     build: .
-    container_name: quant-trade
+    container_name: quant-trade-python
     restart: unless-stopped
 
     # 环境变量
