@@ -41,25 +41,6 @@ class TaskRunner:
 
         return True
 
-    async def run_stock_update(self):
-        """
-        运行股票详细信息更新任务
-        更新股价、市值等详细信息
-        """
-        logger.info("=" * 80)
-        logger.info("手动执行：股票详细信息更新任务")
-        logger.info(f"开始时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        logger.info("=" * 80)
-
-        try:
-            await self.stock_fetcher.update_all_stock_details()
-            logger.info("\n✅ 股票详细信息更新任务执行成功！")
-        except Exception as e:
-            logger.error(f"\n❌ 股票详细信息更新任务执行失败: {e}", exc_info=True)
-            return False
-
-        return True
-
     async def run_company_sync(self):
         """
         运行公司信息同步任务
@@ -88,13 +69,8 @@ def print_menu():
     print("1. 执行股票基本信息同步任务")
     print("   - 从数据源获取A股股票列表")
     print("   - 比对数据库，插入新股票")
-    print("   - 更新所有股票的详细信息")
     print()
-    print("2. 仅执行股票详细信息更新任务")
-    print("   - 获取每只股票的最新股价、市值等信息")
-    print("   - 比对数据库，更新变化的字段")
-    print()
-    print("3. 执行公司信息同步任务")
+    print("2. 执行公司信息同步任务")
     print("   - 从 Tushare Pro 获取全量公司基本信息")
     print("   - 批量插入/更新到数据库")
     print()
@@ -108,7 +84,7 @@ async def main():
 
     while True:
         print_menu()
-        choice = input("请选择要执行的任务 (0-3): ").strip()
+        choice = input("请选择要执行的任务 (0-2): ").strip()
 
         if choice == "0":
             logger.info("退出任务运行器")
@@ -128,20 +104,6 @@ async def main():
             else:
                 logger.info("取消执行")
         elif choice == "2":
-            confirm = input("\n确认执行股票详细信息更新任务？(y/n): ").strip().lower()
-            if confirm == "y":
-                start_time = datetime.now()
-                success = await runner.run_stock_update()
-                end_time = datetime.now()
-                duration = (end_time - start_time).total_seconds()
-
-                if success:
-                    logger.info(f"\n⏱️  任务执行耗时: {duration:.2f} 秒")
-                else:
-                    logger.error(f"\n⏱️  任务执行失败，耗时: {duration:.2f} 秒")
-            else:
-                logger.info("取消执行")
-        elif choice == "3":
             confirm = input("\n确认执行公司信息同步任务？(y/n): ").strip().lower()
             if confirm == "y":
                 start_time = datetime.now()
