@@ -23,12 +23,16 @@ dependencies = [
 
     # Stock Data
     "akshare>=1.12.0",
+    "tushare>=1.4.0",
 
     # Task Scheduling
     "apscheduler>=3.10.0",
 
     # HTTP Client
     "httpx>=0.25.0",
+
+    # Logging
+    "loguru>=0.7.0",
 
     # Environment & Configuration
     "python-dotenv>=1.0.0",
