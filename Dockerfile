@@ -24,6 +24,7 @@ RUN pip install --upgrade pip && \
 
 # 复制应用代码
 COPY app ./app
+COPY scripts ./scripts
 COPY .env.example .env
 
 # 创建日志目录
