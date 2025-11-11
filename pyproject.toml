@@ -24,6 +24,7 @@ dependencies = [
     # Stock Data
     "akshare>=1.12.0",
     "tushare>=1.4.0",
+    "baostock>=0.8.8",
 
     # Task Scheduling
     "apscheduler>=3.10.0",

@@ -12,6 +12,7 @@ from apscheduler.triggers.cron import CronTrigger
 from app.utils.logger import logger
 from app.core.config import settings
 from app.tasks.stock_data_fetcher import StockDataFetcher
+from app.tasks.trading_calendar_fetcher import TradingCalendarFetcher
 
 
 class TradingService:
@@ -21,6 +22,7 @@ class TradingService:
         self.running = False
         self.tasks = []
         self.stock_fetcher = StockDataFetcher()
+        self.calendar_fetcher = TradingCalendarFetcher()
         self.scheduler = AsyncIOScheduler()
         logger.info(f"初始化 {settings.project_name} v{settings.version}")
 
@@ -158,38 +160,90 @@ class TradingService:
         except Exception as e:
             logger.error(f"股票数据获取出错: {e}", exc_info=True)
 
+    async def _trading_calendar_fetch_task(self):
+        """交易日历数据获取任务 - 由调度器触发"""
+        try:
+            logger.info("触发定时交易日历同步任务...")
+            await self.calendar_fetcher.sync_trading_calendar()
+        except Exception as e:
+            logger.error(f"交易日历数据获取出错: {e}", exc_info=True)
+
     async def _stock_data_fetch_loop(self):
         """股票数据获取调度器 - 每天凌晨0:00执行"""
-        logger.info("📊 股票数据获取任务已启动")
-        logger.info(f"调度时间: 每天 {settings.stock_fetch_schedule_hour:02d}:{settings.stock_fetch_schedule_minute:02d}")
+        logger.info("📊 股票数据获取任务调度器已启动")
+        logger.info(f"⏰ 调度时间: 每天 {settings.stock_fetch_schedule_hour:02d}:{settings.stock_fetch_schedule_minute:02d}")
 
         # 配置 cron 触发器：每天凌晨0:00执行
-        trigger = CronTrigger(
+        stock_trigger = CronTrigger(
             day_of_week=settings.stock_fetch_schedule_day_of_week,
             hour=settings.stock_fetch_schedule_hour,
             minute=settings.stock_fetch_schedule_minute
         )
 
-        # 添加调度任务
+        # 配置 cron 触发器：每周末凌晨1:00执行
+        company_trigger = CronTrigger(
+            day_of_week=settings.company_fetch_schedule_day_of_week,
+            hour=settings.company_fetch_schedule_hour,
+            minute=settings.company_fetch_schedule_minute
+        )
+
+        # 配置 cron 触发器：每天凌晨2:00执行
+        calendar_trigger = CronTrigger(
+            day_of_week=settings.trading_calendar_schedule_day_of_week,
+            hour=settings.trading_calendar_schedule_hour,
+            minute=settings.trading_calendar_schedule_minute
+        )
+
+        # 添加股票数据获取调度任务
         self.scheduler.add_job(
             self._stock_data_fetch_task,
-            trigger=trigger,
+            trigger=stock_trigger,
             id="stock_data_fetch",
             name="股票数据获取任务",
             replace_existing=True
         )
+        logger.info("✓ 股票数据获取调度任务已添加")
+
+        # 添加公司数据获取调度任务
+        self.scheduler.add_job(
+            self._company_data_fetch_task,
+            trigger=company_trigger,
+            id="company_data_fetch",
+            name="公司数据获取任务",
+            replace_existing=True
+        )
+        logger.info("🏢 公司数据获取任务调度器已启动")
+        logger.info(f"⏰ 调度时间: 每周 {settings.company_fetch_schedule_day_of_week} {settings.company_fetch_schedule_hour:02d}:{settings.company_fetch_schedule_minute:02d}")
+        logger.info("✓ 公司数据获取调度任务已添加")
+
+        # 添加交易日历获取调度任务
+        self.scheduler.add_job(
+            self._trading_calendar_fetch_task,
+            trigger=calendar_trigger,
+            id="trading_calendar_fetch",
+            name="交易日历获取任务",
+            replace_existing=True
+        )
+        logger.info("📅 交易日历获取任务调度器已启动")
+        logger.info(f"⏰ 调度时间: 每天 {settings.trading_calendar_schedule_hour:02d}:{settings.trading_calendar_schedule_minute:02d}")
+        logger.info("✓ 交易日历获取调度任务已添加")
 
         # 启动调度器
-        self.scheduler.start()
-        logger.info("✓ 调度器已启动，等待定时任务触发...")
+        if not self.scheduler.running:
+            self.scheduler.start()
+            logger.info("=" * 60)
+            logger.info("✓ APScheduler 调度器已启动")
+            logger.info("等待定时任务触发...")
+            logger.info("=" * 60)
 
         # 保持任务运行，等待取消
         try:
             while self.running:
                 await asyncio.sleep(60)  # 每分钟检查一次运行状态
         except asyncio.CancelledError:
-            logger.info("股票数据获取调度器已取消")
-            self.scheduler.shutdown()
+            logger.info("调度器已取消")
+            if self.scheduler.running:
+                self.scheduler.shutdown()
             raise
 
     async def _company_data_fetch_task(self):
@@ -201,34 +255,16 @@ class TradingService:
             logger.error(f"公司数据获取出错: {e}", exc_info=True)
 
     async def _company_data_fetch_loop(self):
-        """公司数据获取调度器 - 每周末凌晨1:00执行"""
-        logger.info("🏢 公司数据获取任务已启动")
-        logger.info(f"调度时间: 每周末 {settings.company_fetch_schedule_hour:02d}:{settings.company_fetch_schedule_minute:02d}")
-
-        # 配置 cron 触发器：每周末凌晨1:00执行
-        trigger = CronTrigger(
-            day_of_week=settings.company_fetch_schedule_day_of_week,
-            hour=settings.company_fetch_schedule_hour,
-            minute=settings.company_fetch_schedule_minute
-        )
-
-        # 添加调度任务
-        self.scheduler.add_job(
-            self._company_data_fetch_task,
-            trigger=trigger,
-            id="company_data_fetch",
-            name="公司数据获取任务",
-            replace_existing=True
-        )
-
-        logger.info("✓ 公司数据获取调度已添加，等待定时任务触发...")
+        """公司数据获取调度器 - 已合并到 _stock_data_fetch_loop"""
+        # 此方法已废弃，调度逻辑已合并到 _stock_data_fetch_loop
+        logger.info("公司数据获取调度已在股票数据调度器中统一管理")
 
         # 保持任务运行，等待取消
         try:
             while self.running:
-                await asyncio.sleep(60)  # 每分钟检查一次运行状态
+                await asyncio.sleep(60)
         except asyncio.CancelledError:
-            logger.info("公司数据获取调度器已取消")
+            logger.info("公司数据获取调度器循环已取消")
             raise
 
 
