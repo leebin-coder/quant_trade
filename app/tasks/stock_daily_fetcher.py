@@ -44,13 +44,13 @@ class StockDailyFetcher:
 
         流程：
         1. 查询数据库中最新的日线数据日期
-        2. 如果返回null，则从1990年开始查询交易日历
-        3. 如果返回日期，则查询当年的交易日历
-        4. 判断今天是否为交易日，如果不是则直接结束
-        5. 如果是交易日且在今天之前，从返回的日期后一个交易日开始
-        6. 逐个交易日请求日线数据，直到今天为止
-        7. 每个交易日请求到数据后调用后端接口保存
-        8. 每调用450次Tushare接口，停止10秒
+        2. 如果没有则从1990年开始查交易日，获取到距今天最近的一个交易日（包括今天）的所有交易日
+        3. 如果有最新日期：
+           - 今天是交易日且返回的日期是今天 → 直接结束
+           - 今天是交易日且返回的日期是前一个交易日 → 只查今天
+           - 今天不是交易日 → 从返回的日期开始查到今天前的一个交易日
+        4. 拿到所有要查的交易日后，开始一天一天的查 Tushare（不传股票代码）
+        5. 从 Tushare 查到数据后直接调用后端接口保存
         """
         logger.info("=" * 80)
         logger.info("开始同步股票日线数据...")
@@ -62,63 +62,89 @@ class StockDailyFetcher:
             logger.info("📊 步骤1: 查询数据库中最新的日线数据日期...")
             latest_date = await self._get_latest_daily_date()
 
-            # 2. 获取交易日历
+            # 2. 获取交易日历（到今天为止）
+            today = datetime.now().strftime("%Y-%m-%d")
             logger.info("\n📊 步骤2: 获取交易日历...")
+
             if latest_date:
                 logger.info(f"✓ 数据库中最新日线数据日期: {latest_date}")
-                # 查询当年的交易日历
-                year = datetime.strptime(latest_date, "%Y-%m-%d").year
-                trade_dates = await self._get_trade_calendar(year)
+                # 获取从最新日期所在年到今年的交易日历
+                start_year = datetime.strptime(latest_date, "%Y-%m-%d").year
+                current_year = datetime.now().year
+                trade_dates = []
+                for year in range(start_year, current_year + 1):
+                    logger.info(f"  获取 {year} 年交易日历...")
+                    year_dates = await self._get_trade_calendar(year)
+                    trade_dates.extend(year_dates)
+                    await asyncio.sleep(0.1)
+                trade_dates.sort()
             else:
                 logger.info("✓ 数据库中没有日线数据，从1990年开始查询交易日历")
-                # 从1990年开始查询所有交易日历
+                # 从1990年开始查询所有交易日历到今天
                 trade_dates = await self._get_trade_calendar_from_1990()
 
             if not trade_dates:
                 logger.warning("⚠️  未获取到交易日历数据，任务结束")
                 return
 
-            # 3. 判断今天是否为交易日
-            today = datetime.now().strftime("%Y-%m-%d")
-            logger.info(f"\n📊 步骤3: 判断今天 {today} 是否为交易日...")
+            # 只保留到今天为止的交易日（包括今天）
+            trade_dates = [d for d in trade_dates if d <= today]
+            logger.info(f"✓ 共获取 {len(trade_dates)} 个交易日（截止到今天）")
 
-            if today not in trade_dates:
-                logger.info("✓ 今天不是交易日，任务结束")
-                return
+            # 3. 确定需要同步的交易日期范围
+            logger.info("\n📊 步骤3: 确定需要同步的日期范围...")
 
-            logger.info("✓ 今天是交易日，继续执行")
-
-            # 4. 确定需要同步的交易日期范围
-            logger.info("\n📊 步骤4: 确定需要同步的日期范围...")
             if latest_date:
-                # 找到最新日期之后的交易日
-                start_idx = trade_dates.index(latest_date) + 1 if latest_date in trade_dates else 0
-                dates_to_sync = trade_dates[start_idx:]
+                # 检查今天是否是交易日
+                is_today_trading = today in trade_dates
 
-                # 只同步到今天（包括今天）
-                dates_to_sync = [d for d in dates_to_sync if d <= today]
+                if is_today_trading:
+                    if latest_date == today:
+                        # 今天是交易日且返回的日期是今天 → 直接结束
+                        logger.info("✓ 最新数据已是今天，无需同步")
+                        return
+                    else:
+                        # 今天是交易日且返回的日期不是今天
+                        # 找到最新日期的下一个交易日
+                        if latest_date in trade_dates:
+                            latest_idx = trade_dates.index(latest_date)
+                            # 获取从下一个交易日到今天的所有交易日
+                            dates_to_sync = trade_dates[latest_idx + 1:]
+                            dates_to_sync = [d for d in dates_to_sync if d <= today]
+                        else:
+                            # 如果最新日期不在交易日列表中，从最新日期之后的第一个交易日开始
+                            dates_to_sync = [d for d in trade_dates if d > latest_date and d <= today]
 
-                if not dates_to_sync:
-                    logger.info("✓ 已是最新数据，无需同步")
-                    return
+                        if not dates_to_sync:
+                            logger.info("✓ 已是最新数据，无需同步")
+                            return
+                else:
+                    # 今天不是交易日 → 从返回的日期的下一个交易日查到今天前的一个交易日
+                    if latest_date in trade_dates:
+                        latest_idx = trade_dates.index(latest_date)
+                        # 获取从下一个交易日开始的所有交易日（今天不是交易日，所以不会包含今天）
+                        dates_to_sync = trade_dates[latest_idx + 1:]
+                        dates_to_sync = [d for d in dates_to_sync if d < today]
+                    else:
+                        # 如果最新日期不在交易日列表中，从最新日期之后的第一个交易日开始
+                        dates_to_sync = [d for d in trade_dates if d > latest_date and d < today]
+
+                    if not dates_to_sync:
+                        logger.info("✓ 今天不是交易日，且已是最新数据，无需同步")
+                        return
 
                 logger.info(f"✓ 需要同步 {len(dates_to_sync)} 个交易日的数据")
                 logger.info(f"  起始日期: {dates_to_sync[0]}")
                 logger.info(f"  结束日期: {dates_to_sync[-1]}")
             else:
-                # 从1990年开始到今天的所有交易日
-                dates_to_sync = [d for d in trade_dates if d <= today]
+                # 从1990年第一个交易日开始到今天（或今天前的一个交易日）
+                dates_to_sync = trade_dates
                 logger.info(f"✓ 需要同步 {len(dates_to_sync)} 个交易日的数据（从1990年开始）")
                 logger.info(f"  起始日期: {dates_to_sync[0]}")
                 logger.info(f"  结束日期: {dates_to_sync[-1]}")
 
-            # 5. 获取所有股票代码
-            logger.info("\n📊 步骤5: 获取所有股票代码...")
-            stock_codes = await self._get_all_stock_codes()
-            logger.info(f"✓ 获取到 {len(stock_codes)} 只股票")
-
-            # 6. 逐个交易日同步数据
-            logger.info("\n📊 步骤6: 开始逐个交易日同步数据...")
+            # 4. 逐个交易日同步数据（不传股票代码，直接从Tushare按日期查询）
+            logger.info("\n📊 步骤4: 开始逐个交易日从Tushare同步数据...")
             total_dates = len(dates_to_sync)
             success_count = 0
             fail_count = 0
@@ -127,11 +153,11 @@ class StockDailyFetcher:
                 logger.info(f"\n[{idx}/{total_dates}] 正在同步 {trade_date} 的日线数据...")
 
                 try:
-                    # 获取该交易日所有股票的日线数据
-                    daily_data = await self._fetch_daily_by_date(trade_date, stock_codes)
+                    # 从Tushare获取该交易日的所有股票日线数据（不传股票代码）
+                    daily_data = await self._fetch_daily_by_date(trade_date)
 
                     if daily_data:
-                        # 保存到数据库
+                        # 直接保存到数据库
                         saved = await self._save_daily_data(daily_data)
                         if saved:
                             success_count += 1
@@ -147,7 +173,7 @@ class StockDailyFetcher:
                     logger.error(f"✗ {trade_date} 数据同步失败: {str(e)}")
                     continue
 
-            # 7. 总结
+            # 5. 总结
             logger.info("\n" + "=" * 80)
             logger.info(f"✓ 股票日线数据同步完成！")
             logger.info(f"  成功: {success_count}/{total_dates}")
@@ -271,64 +297,56 @@ class StockDailyFetcher:
             logger.error(f"获取股票代码列表失败: {str(e)}")
             return []
 
-    async def _fetch_daily_by_date(self, trade_date: str, stock_codes: List[str]) -> List[Dict]:
+    async def _fetch_daily_by_date(self, trade_date: str) -> List[Dict]:
         """
-        获取指定交易日所有股票的日线数据
+        获取指定交易日所有股票的日线数据（不传股票代码）
 
         Args:
             trade_date: 交易日期，格式: YYYY-MM-DD
-            stock_codes: 股票代码列表
 
         Returns:
             日线数据列表
         """
-        all_daily_data = []
+        try:
+            # 检查并控制频率
+            await self._check_rate_limit()
 
-        # 转换日期格式 YYYY-MM-DD -> YYYYMMDD
-        date_str = trade_date.replace("-", "")
+            # 转换日期格式 YYYY-MM-DD -> YYYYMMDD
+            date_str = trade_date.replace("-", "")
 
-        # 逐个股票获取数据（按照Tushare的要求）
-        total_stocks = len(stock_codes)
-        for idx, ts_code in enumerate(stock_codes, 1):
-            try:
-                # 检查并控制频率
-                await self._check_rate_limit()
+            # 调用 Tushare 接口获取该日所有股票的日线数据（不传 ts_code）
+            df = self.pro.daily(trade_date=date_str)
 
-                # 调用 Tushare 接口获取日线数据
-                df = self.pro.daily(
-                    ts_code=ts_code,
-                    trade_date=date_str
-                )
+            self.request_count += 1
 
-                self.request_count += 1
+            if df is None or df.empty:
+                logger.warning(f"  {trade_date} 未获取到数据")
+                return []
 
-                if df is not None and not df.empty:
-                    # 转换数据格式
-                    for _, row in df.iterrows():
-                        daily_item = {
-                            "stockCode": row["ts_code"],
-                            "tradeDate": f"{row['trade_date'][:4]}-{row['trade_date'][4:6]}-{row['trade_date'][6:8]}",
-                            "openPrice": float(row["open"]) if pd.notna(row["open"]) else None,
-                            "highPrice": float(row["high"]) if pd.notna(row["high"]) else None,
-                            "lowPrice": float(row["low"]) if pd.notna(row["low"]) else None,
-                            "closePrice": float(row["close"]) if pd.notna(row["close"]) else None,
-                            "preClose": float(row["pre_close"]) if pd.notna(row["pre_close"]) else None,
-                            "changeAmount": float(row["change"]) if pd.notna(row["change"]) else None,
-                            "pctChange": float(row["pct_chg"]) if pd.notna(row["pct_chg"]) else None,
-                            "volume": float(row["vol"]) if pd.notna(row["vol"]) else None,
-                            "amount": float(row["amount"]) if pd.notna(row["amount"]) else None
-                        }
-                        all_daily_data.append(daily_item)
+            # 转换数据格式
+            all_daily_data = []
+            for _, row in df.iterrows():
+                daily_item = {
+                    "stockCode": row["ts_code"],
+                    "tradeDate": f"{row['trade_date'][:4]}-{row['trade_date'][4:6]}-{row['trade_date'][6:8]}",
+                    "openPrice": float(row["open"]) if pd.notna(row["open"]) else None,
+                    "highPrice": float(row["high"]) if pd.notna(row["high"]) else None,
+                    "lowPrice": float(row["low"]) if pd.notna(row["low"]) else None,
+                    "closePrice": float(row["close"]) if pd.notna(row["close"]) else None,
+                    "preClose": float(row["pre_close"]) if pd.notna(row["pre_close"]) else None,
+                    "changeAmount": float(row["change"]) if pd.notna(row["change"]) else None,
+                    "pctChange": float(row["pct_chg"]) if pd.notna(row["pct_chg"]) else None,
+                    "volume": float(row["vol"]) if pd.notna(row["vol"]) else None,
+                    "amount": float(row["amount"]) if pd.notna(row["amount"]) else None
+                }
+                all_daily_data.append(daily_item)
 
-                # 每处理100只股票输出一次进度
-                if idx % 100 == 0:
-                    logger.info(f"  进度: {idx}/{total_stocks}, 已获取 {len(all_daily_data)} 条记录")
+            logger.info(f"  从Tushare获取到 {len(all_daily_data)} 条记录")
+            return all_daily_data
 
-            except Exception as e:
-                logger.warning(f"  获取 {ts_code} 的数据失败: {str(e)}")
-                continue
-
-        return all_daily_data
+        except Exception as e:
+            logger.error(f"  从Tushare获取 {trade_date} 数据失败: {str(e)}")
+            return []
 
     async def _check_rate_limit(self):
         """
