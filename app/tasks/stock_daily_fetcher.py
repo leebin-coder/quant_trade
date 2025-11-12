@@ -175,9 +175,12 @@ class StockDailyFetcher:
                 )
                 response.raise_for_status()
 
-                # 返回值是字符串日期或空字符串
+                # 返回值可能是字符串日期、null或空字符串
                 latest_date = response.text.strip().strip('"')
-                return latest_date if latest_date and latest_date != "null" else None
+                # 判断是否为有效日期：排除空字符串、"null"字符串和None
+                if not latest_date or latest_date.lower() == "null":
+                    return None
+                return latest_date
 
         except Exception as e:
             logger.error(f"查询最新日线数据日期失败: {str(e)}")
