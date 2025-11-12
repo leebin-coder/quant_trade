@@ -175,11 +175,16 @@ class StockDailyFetcher:
                 )
                 response.raise_for_status()
 
-                # 返回值可能是字符串日期、null或空字符串
-                latest_date = response.text.strip().strip('"')
-                # 判断是否为有效日期：排除空字符串、"null"字符串和None
-                if not latest_date or latest_date.lower() == "null":
+                # 解析 JSON 响应
+                result = response.json()
+
+                # 从 data 字段中获取日期数据
+                latest_date = result.get("data")
+
+                # 判断是否为有效日期：data 可能是 null、空字符串或有效日期字符串
+                if not latest_date or (isinstance(latest_date, str) and latest_date.lower() == "null"):
                     return None
+
                 return latest_date
 
         except Exception as e:
