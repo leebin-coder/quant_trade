@@ -63,6 +63,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = False
+        extra = "ignore"  # 忽略未定义的环境变量
 
 
 # 创建全局配置实例
