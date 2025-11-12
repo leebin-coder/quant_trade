@@ -13,6 +13,7 @@ from app.utils.logger import logger
 from app.core.config import settings
 from app.tasks.stock_data_fetcher import StockDataFetcher
 from app.tasks.trading_calendar_fetcher import TradingCalendarFetcher
+from app.tasks.stock_daily_fetcher import StockDailyFetcher
 
 
 class TradingService:
@@ -23,6 +24,7 @@ class TradingService:
         self.tasks = []
         self.stock_fetcher = StockDataFetcher()
         self.calendar_fetcher = TradingCalendarFetcher()
+        self.daily_fetcher = StockDailyFetcher()
         self.scheduler = AsyncIOScheduler()
         logger.info(f"初始化 {settings.project_name} v{settings.version}")
 
@@ -168,6 +170,14 @@ class TradingService:
         except Exception as e:
             logger.error(f"交易日历数据获取出错: {e}", exc_info=True)
 
+    async def _stock_daily_fetch_task(self):
+        """股票日线数据获取任务 - 由调度器触发"""
+        try:
+            logger.info("触发定时股票日线数据同步任务...")
+            await self.daily_fetcher.sync_stock_daily()
+        except Exception as e:
+            logger.error(f"股票日线数据获取出错: {e}", exc_info=True)
+
     async def _stock_data_fetch_loop(self):
         """股票数据获取调度器 - 每天凌晨0:00执行"""
         logger.info("📊 股票数据获取任务调度器已启动")
@@ -192,6 +202,13 @@ class TradingService:
             day_of_week=settings.trading_calendar_schedule_day_of_week,
             hour=settings.trading_calendar_schedule_hour,
             minute=settings.trading_calendar_schedule_minute
+        )
+
+        # 配置 cron 触发器：每天下午4:00执行
+        daily_trigger = CronTrigger(
+            day_of_week=settings.stock_daily_schedule_day_of_week,
+            hour=settings.stock_daily_schedule_hour,
+            minute=settings.stock_daily_schedule_minute
         )
 
         # 添加股票数据获取调度任务
@@ -227,6 +244,18 @@ class TradingService:
         logger.info("📅 交易日历获取任务调度器已启动")
         logger.info(f"⏰ 调度时间: 每天 {settings.trading_calendar_schedule_hour:02d}:{settings.trading_calendar_schedule_minute:02d}")
         logger.info("✓ 交易日历获取调度任务已添加")
+
+        # 添加股票日线数据获取调度任务
+        self.scheduler.add_job(
+            self._stock_daily_fetch_task,
+            trigger=daily_trigger,
+            id="stock_daily_fetch",
+            name="股票日线数据获取任务",
+            replace_existing=True
+        )
+        logger.info("📈 股票日线数据获取任务调度器已启动")
+        logger.info(f"⏰ 调度时间: 每天 {settings.stock_daily_schedule_hour:02d}:{settings.stock_daily_schedule_minute:02d}")
+        logger.info("✓ 股票日线数据获取调度任务已添加")
 
         # 启动调度器
         if not self.scheduler.running:
