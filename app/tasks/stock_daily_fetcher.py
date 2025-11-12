@@ -238,8 +238,9 @@ class StockDailyFetcher:
                 result = response.json()
                 if result.get("code") == 200:
                     data = result.get("data", [])
-                    # 提取所有交易日（is_open=1）的日期
-                    trade_dates = [item["calendar_date"] for item in data if item.get("is_open") == 1]
+                    # 提取所有交易日（isTradingDay=1）的日期
+                    # 字段名：tradeDate, isTradingDay
+                    trade_dates = [item["tradeDate"] for item in data if item.get("isTradingDay") == 1]
                     trade_dates.sort()
                     return trade_dates
                 else:
