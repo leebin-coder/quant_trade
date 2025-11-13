@@ -34,7 +34,7 @@ class StockDailyFetcher:
 
         # 频率限制控制
         self.request_count = 0  # 当前分钟内的请求计数
-        self.request_limit = 450  # 每分钟最大请求次数
+        self.request_limit = 45  # 每分钟最大请求次数
         self.last_reset_time = time.time()  # 上次重置计数的时间
 
     async def sync_stock_daily(self):
@@ -352,7 +352,7 @@ class StockDailyFetcher:
     async def _check_rate_limit(self):
         """
         检查并控制API调用频率
-        每分钟不超过450次，每调用450次停止10秒
+        每分钟不超过45次，达到45次后等待到下一分钟再继续
         """
         current_time = time.time()
 
@@ -361,10 +361,15 @@ class StockDailyFetcher:
             self.request_count = 0
             self.last_reset_time = current_time
 
-        # 如果达到限制，暂停10秒
+        # 如果达到限制，等待到下一分钟
         if self.request_count >= self.request_limit:
-            logger.info(f"⏸️  已达到频率限制({self.request_limit}次/分钟)，暂停10秒...")
-            await asyncio.sleep(10)
+            # 计算需要等待的时间（到下一分钟）
+            elapsed = current_time - self.last_reset_time
+            wait_time = 60 - elapsed
+            if wait_time > 0:
+                logger.info(f"⏸️  已达到频率限制({self.request_limit}次/分钟)，等待 {wait_time:.1f} 秒到下一分钟...")
+                await asyncio.sleep(wait_time)
+            # 重置计数和时间
             self.request_count = 0
             self.last_reset_time = time.time()
 
