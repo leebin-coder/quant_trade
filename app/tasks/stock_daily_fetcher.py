@@ -35,7 +35,10 @@ class StockDailyFetcher:
         # 频率限制控制
         self.request_count = 0  # 当前分钟内的请求计数
         self.request_limit = 45  # 每分钟最大请求次数
-        self.last_reset_time = time.time()  # 上次重置计数的时间
+        self.minute_start_time = None  # 第一次请求的时间，用于计算一分钟周期
+        self.max_retries = 3  # 单次请求最大重试次数
+        self.retry_delay = 5  # 每次重试等待时间（秒）
+        self.final_retry_delay = 60  # 三次失败后的最终重试等待时间（秒）
 
     async def sync_stock_daily(self):
         """
@@ -156,6 +159,17 @@ class StockDailyFetcher:
                     # 从Tushare获取该交易日的所有股票日线数据（不传股票代码）
                     daily_data = await self._fetch_daily_by_date(trade_date)
 
+                    # 检查是否是最终失败（返回None）
+                    if daily_data is None:
+                        logger.error(f"❌ {trade_date} 数据获取最终失败，任务结束")
+                        logger.info("\n" + "=" * 80)
+                        logger.info(f"✗ 股票日线数据同步被中断！")
+                        logger.info(f"  成功: {success_count}/{idx}")
+                        logger.info(f"  失败: {fail_count + 1}/{idx}")
+                        logger.info(f"  中断于: {trade_date}")
+                        logger.info("=" * 80)
+                        return
+
                     if daily_data:
                         # 直接保存到数据库
                         saved = await self._save_daily_data(daily_data)
@@ -166,6 +180,7 @@ class StockDailyFetcher:
                             fail_count += 1
                             logger.error(f"✗ {trade_date} 数据保存失败")
                     else:
+                        # 空列表，表示该日期没有数据（非交易日或其他原因）
                         logger.warning(f"⚠️  {trade_date} 未获取到数据")
 
                 except Exception as e:
@@ -302,27 +317,84 @@ class StockDailyFetcher:
         """
         获取指定交易日所有股票的日线数据（不传股票代码）
 
+        带重试机制：
+        - 失败时等待5秒重试，最多重试3次
+        - 3次都失败后等待1分钟再重试一次
+        - 如果最终重试还是失败，返回None并结束任务
+
         Args:
             trade_date: 交易日期，格式: YYYY-MM-DD
 
         Returns:
-            日线数据列表
+            日线数据列表，如果最终失败返回 None（区别于空列表）
         """
+        # 转换日期格式 YYYY-MM-DD -> YYYYMMDD
+        date_str = trade_date.replace("-", "")
+
+        # 第一阶段：尝试3次，每次失败等待5秒
+        for attempt in range(1, self.max_retries + 1):
+            try:
+                # 检查并控制频率
+                await self._check_rate_limit()
+
+                # 调用 Tushare 接口获取该日所有股票的日线数据（不传 ts_code）
+                df = self.pro.daily(trade_date=date_str)
+
+                # 请求成功，增加计数
+                self.request_count += 1
+
+                if df is None or df.empty:
+                    logger.warning(f"  {trade_date} 未获取到数据")
+                    return []
+
+                # 转换数据格式
+                all_daily_data = []
+                for _, row in df.iterrows():
+                    daily_item = {
+                        "stockCode": row["ts_code"],
+                        "tradeDate": f"{row['trade_date'][:4]}-{row['trade_date'][4:6]}-{row['trade_date'][6:8]}",
+                        "openPrice": float(row["open"]) if pd.notna(row["open"]) else None,
+                        "highPrice": float(row["high"]) if pd.notna(row["high"]) else None,
+                        "lowPrice": float(row["low"]) if pd.notna(row["low"]) else None,
+                        "closePrice": float(row["close"]) if pd.notna(row["close"]) else None,
+                        "preClose": float(row["pre_close"]) if pd.notna(row["pre_close"]) else None,
+                        "changeAmount": float(row["change"]) if pd.notna(row["change"]) else None,
+                        "pctChange": float(row["pct_chg"]) if pd.notna(row["pct_chg"]) else None,
+                        "volume": float(row["vol"]) if pd.notna(row["vol"]) else None,
+                        "amount": float(row["amount"]) if pd.notna(row["amount"]) else None
+                    }
+                    all_daily_data.append(daily_item)
+
+                logger.info(f"  从Tushare获取到 {len(all_daily_data)} 条记录")
+                return all_daily_data
+
+            except Exception as e:
+                logger.error(f"  从Tushare获取 {trade_date} 数据失败 (尝试 {attempt}/{self.max_retries}): {str(e)}")
+
+                if attempt < self.max_retries:
+                    logger.info(f"  等待 {self.retry_delay} 秒后重试...")
+                    await asyncio.sleep(self.retry_delay)
+                else:
+                    # 3次都失败了，进入最终重试阶段
+                    logger.warning(f"  {trade_date} 已重试 {self.max_retries} 次失败，等待 {self.final_retry_delay} 秒后进行最终重试...")
+                    await asyncio.sleep(self.final_retry_delay)
+
+        # 第二阶段：最终重试一次
         try:
+            logger.info(f"  {trade_date} 开始最终重试...")
+
             # 检查并控制频率
             await self._check_rate_limit()
 
-            # 转换日期格式 YYYY-MM-DD -> YYYYMMDD
-            date_str = trade_date.replace("-", "")
-
-            # 调用 Tushare 接口获取该日所有股票的日线数据（不传 ts_code）
+            # 调用 Tushare 接口
             df = self.pro.daily(trade_date=date_str)
 
+            # 请求成功，增加计数
             self.request_count += 1
 
             if df is None or df.empty:
-                logger.warning(f"  {trade_date} 未获取到数据")
-                return []
+                logger.error(f"  {trade_date} 最终重试仍未获取到数据，任务将结束")
+                return None
 
             # 转换数据格式
             all_daily_data = []
@@ -342,36 +414,46 @@ class StockDailyFetcher:
                 }
                 all_daily_data.append(daily_item)
 
-            logger.info(f"  从Tushare获取到 {len(all_daily_data)} 条记录")
+            logger.info(f"  最终重试成功，从Tushare获取到 {len(all_daily_data)} 条记录")
             return all_daily_data
 
         except Exception as e:
-            logger.error(f"  从Tushare获取 {trade_date} 数据失败: {str(e)}")
-            return []
+            logger.error(f"  {trade_date} 最终重试失败: {str(e)}，任务将结束")
+            return None
 
     async def _check_rate_limit(self):
         """
         检查并控制API调用频率
-        每分钟不超过45次，达到45次后等待到下一分钟再继续
+        从第一次请求Tushare开始计时，每分钟最多45次请求
         """
         current_time = time.time()
 
-        # 如果超过1分钟，重置计数
-        if current_time - self.last_reset_time >= 60:
+        # 如果是第一次请求，记录开始时间
+        if self.minute_start_time is None:
+            self.minute_start_time = current_time
+            logger.info(f"⏱️  开始计时，每分钟最多 {self.request_limit} 次请求")
+            return
+
+        # 计算从第一次请求到现在经过的时间
+        elapsed = current_time - self.minute_start_time
+
+        # 如果已经超过1分钟，重置计数和开始时间
+        if elapsed >= 60:
             self.request_count = 0
-            self.last_reset_time = current_time
+            self.minute_start_time = current_time
+            logger.info(f"⏱️  新的一分钟开始，重置计数器")
+            return
 
         # 如果达到限制，等待到下一分钟
         if self.request_count >= self.request_limit:
-            # 计算需要等待的时间（到下一分钟）
-            elapsed = current_time - self.last_reset_time
             wait_time = 60 - elapsed
             if wait_time > 0:
                 logger.info(f"⏸️  已达到频率限制({self.request_limit}次/分钟)，等待 {wait_time:.1f} 秒到下一分钟...")
                 await asyncio.sleep(wait_time)
             # 重置计数和时间
             self.request_count = 0
-            self.last_reset_time = time.time()
+            self.minute_start_time = time.time()
+            logger.info(f"⏱️  新的一分钟开始，重置计数器")
 
     async def _save_daily_data(self, daily_data: List[Dict]) -> bool:
         """
