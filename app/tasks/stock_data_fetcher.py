@@ -36,10 +36,8 @@ class StockDataFetcher:
         每天凌晨00:00执行一次
 
         流程：
-        1. 调用后端查询接口（1次） - 获取已存在的股票代码
-        2. 调用 Tushare 股票列表接口（1次） - 获取所有A股股票信息
-        3. 对比差异，找出需要插入的新股票
-        4. 调用后端批量插入接口（若干次） - 只插入新股票
+        1. 从 Tushare Pro 获取所有A股股票信息
+        2. 分批调用后端批量插入或更新接口（每批1000条）
         """
         logger.info("=" * 80)
         logger.info("开始同步股票基本信息...")
@@ -47,30 +45,17 @@ class StockDataFetcher:
         logger.info("=" * 80)
 
         try:
-            # 1. 查询数据库中已存在的股票代码（只查代码，减少数据传输）
-            logger.info("📊 步骤1: 查询数据库中已存在的股票代码...")
-            existing_codes = await self._query_existing_stock_codes()
-            logger.info(f"✓ 数据库中已存在 {len(existing_codes)} 支股票")
-
-            # 2. 从 Tushare Pro 获取所有A股股票信息
-            logger.info("\n📊 步骤2: 从 Tushare Pro 获取所有A股股票信息...")
+            # 1. 从 Tushare Pro 获取所有A股股票信息
+            logger.info("\n📊 步骤1: 从 Tushare Pro 获取所有A股股票信息...")
             all_stocks = await self._fetch_a_share_info()
             logger.info(f"✓ 从 Tushare Pro 获取到 {len(all_stocks)} 支A股股票")
 
-            # 3. 对比差异，找出需要插入的新股票
-            logger.info("\n📊 步骤3: 对比差异，筛选需要插入的新股票...")
-            stocks_to_insert = [
-                stock for stock in all_stocks
-                if stock["stockCode"] not in existing_codes
-            ]
-            logger.info(f"✓ 发现 {len(stocks_to_insert)} 支新股票需要插入")
-
-            # 4. 分批插入新股票
-            if stocks_to_insert:
-                logger.info(f"\n📊 步骤4: 分批插入新股票（每批{self.batch_size}条）...")
-                await self._batch_insert_stocks(stocks_to_insert)
+            # 2. 分批调用后端批量插入或更新接口
+            if all_stocks:
+                logger.info(f"\n📊 步骤2: 分批调用批量插入或更新接口（每批{self.batch_size}条）...")
+                await self._batch_upsert_stocks(all_stocks)
             else:
-                logger.info("\n✓ 没有新股票需要插入，数据已是最新")
+                logger.info("\n⚠️  未获取到股票信息")
 
             self.last_fetch_time = datetime.now()
             logger.info("\n" + "=" * 80)
@@ -80,41 +65,6 @@ class StockDataFetcher:
         except Exception as e:
             logger.error(f"股票信息同步失败: {e}", exc_info=True)
             raise
-
-    async def _query_existing_stock_codes(self) -> set:
-        """
-        查询数据库中已存在的股票代码（只查代码，不查全部字段）
-
-        Returns:
-            set: 已存在的股票代码集合
-        """
-        try:
-            async with httpx.AsyncClient(timeout=None) as client:
-                response = await client.post(
-                    f"{self.api_base_url}/stocks/query",
-                    json={
-                        "exchanges": ["SSE", "SZSE", "BSE"]
-                    },
-                    headers=self.headers
-                )
-                response.raise_for_status()
-
-                result = response.json()
-                if result.get("code") == 200:
-                    stocks = result.get("data", [])
-                    # 只提取股票代码到集合中，释放完整数据
-                    return {stock["stockCode"] for stock in stocks}
-                else:
-                    logger.error(f"查询股票失败: {result.get('message')}")
-                    return set()
-
-        except httpx.HTTPError as e:
-            logger.error(f"查询股票接口请求失败: {e}")
-            return set()
-        except Exception as e:
-            logger.error(f"查询股票时发生错误: {e}", exc_info=True)
-            return set()
-
     async def _fetch_a_share_info(self) -> List[Dict]:
         """
         从 Tushare Pro 获取所有A股股票基本信息
@@ -195,12 +145,13 @@ class StockDataFetcher:
             logger.error(f"获取A股数据失败: {e}", exc_info=True)
             return []
 
-    async def _batch_insert_stocks(self, stocks: List[Dict]):
+    async def _batch_upsert_stocks(self, stocks: List[Dict]):
         """
-        分批次插入股票数据
+        分批次批量插入或更新股票数据
+        每批1000条
 
         Args:
-            stocks: 待插入的股票列表
+            stocks: 待插入或更新的股票列表
         """
         total = len(stocks)
         batches = (total + self.batch_size - 1) // self.batch_size  # 向上取整
@@ -214,7 +165,7 @@ class StockDataFetcher:
                 end_idx = min((i + 1) * self.batch_size, total)
                 batch = stocks[start_idx:end_idx]
 
-                logger.info(f"正在插入第 {i+1}/{batches} 批，共 {len(batch)} 条记录...")
+                logger.info(f"正在处理第 {i+1}/{batches} 批，共 {len(batch)} 条记录...")
 
                 try:
                     response = await client.post(
@@ -227,23 +178,23 @@ class StockDataFetcher:
                     result = response.json()
                     if result.get("code") == 200:
                         success_count += len(batch)
-                        logger.info(f"✓ 第 {i+1} 批插入成功，已累计成功 {success_count}/{total} 条")
+                        logger.info(f"✓ 第 {i+1} 批处理成功，已累计成功 {success_count}/{total} 条")
                     else:
                         fail_count += len(batch)
-                        logger.error(f"✗ 第 {i+1} 批插入失败: {result.get('message')}")
+                        logger.error(f"✗ 第 {i+1} 批处理失败: {result.get('message')}")
 
                 except httpx.HTTPError as e:
                     fail_count += len(batch)
-                    logger.error(f"✗ 第 {i+1} 批插入请求失败: {e}")
+                    logger.error(f"✗ 第 {i+1} 批处理请求失败: {e}")
                 except Exception as e:
                     fail_count += len(batch)
-                    logger.error(f"✗ 第 {i+1} 批插入时发生错误: {e}")
+                    logger.error(f"✗ 第 {i+1} 批处理时发生错误: {e}")
 
                 # 避免请求过快，稍作延迟
                 if i < batches - 1:
                     await asyncio.sleep(0.5)
 
-        logger.info(f"\n批量插入完成: 成功 {success_count} 条, 失败 {fail_count} 条")
+        logger.info(f"\n批量处理完成: 成功 {success_count} 条, 失败 {fail_count} 条")
 
     async def fetch_all_company_info(self):
         """
