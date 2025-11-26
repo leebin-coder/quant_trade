@@ -77,7 +77,7 @@ class StockDailyFetcher:
             # Step 2: 遍历每只股票
             for idx, stock in enumerate(stocks, 1):
                 stock_code = stock.get("stockCode")  # 格式: 000001.SH
-                list_date = stock.get("listDate")  # 上市日期
+                list_date = stock.get("listingDate")  # 上市日期
                 stock_name = stock.get("stockName", "")
 
                 if not stock_code or not list_date:
