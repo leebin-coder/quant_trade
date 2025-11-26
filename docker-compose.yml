@@ -15,7 +15,6 @@ services:
     volumes:
       - ./logs:/app/logs
       - ./.env:/app/.env
-      - /etc/localtime:/etc/localtime:ro
 
     # 资源限制
     deploy:
