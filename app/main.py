@@ -3,13 +3,15 @@
 量化交易系统主服务
 持续运行，定时执行策略和监控市场
 """
+# 首先导入并初始化日志系统，确保使用本地时区
+from app.utils.logger import logger
+
 import asyncio
 import signal
 import sys
 from datetime import datetime
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
-from app.utils.logger import logger
 from app.core.config import settings
 from app.tasks.stock_data_fetcher import StockDataFetcher
 from app.tasks.trading_calendar_fetcher import TradingCalendarFetcher
@@ -25,7 +27,8 @@ class TradingService:
         self.stock_fetcher = StockDataFetcher()
         self.calendar_fetcher = TradingCalendarFetcher()
         self.daily_fetcher = StockDailyFetcher()
-        self.scheduler = AsyncIOScheduler()
+        # 配置 APScheduler 使用本地时区
+        self.scheduler = AsyncIOScheduler(timezone='Asia/Shanghai')
         logger.info(f"初始化 {settings.project_name} v{settings.version}")
 
     async def start(self):

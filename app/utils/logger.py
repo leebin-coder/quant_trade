@@ -1,22 +1,31 @@
 import logging
 import sys
 from datetime import datetime
+import time
 
 
 class LocalTimeFormatter(logging.Formatter):
     """使用本地时区的日志格式化器"""
 
+    converter = time.localtime  # 使用本地时间而不是 gmtime
+
     def formatTime(self, record, datefmt=None):
         """重写 formatTime 方法，使用本地时间而不是 UTC"""
-        dt = datetime.fromtimestamp(record.created)
+        ct = self.converter(record.created)
         if datefmt:
-            return dt.strftime(datefmt)
+            s = time.strftime(datefmt, ct)
         else:
-            return dt.strftime('%Y-%m-%d %H:%M:%S')
+            s = time.strftime('%Y-%m-%d %H:%M:%S', ct)
+        return s
 
 
 def setup_logger():
     """配置日志系统"""
+    # 清除所有现有的处理器
+    root_logger = logging.getLogger()
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+
     # 创建处理器
     handler = logging.StreamHandler(sys.stdout)
 
@@ -28,7 +37,6 @@ def setup_logger():
     handler.setFormatter(formatter)
 
     # 配置根日志记录器
-    root_logger = logging.getLogger()
     root_logger.setLevel(logging.INFO)
     root_logger.addHandler(handler)
 
