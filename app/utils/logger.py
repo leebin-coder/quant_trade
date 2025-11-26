@@ -1,22 +1,15 @@
 import logging
 import sys
-from datetime import datetime
 import time
+
+# 关键：全局设置 logging.Formatter 使用本地时间
+# 这会影响所有使用 logging 模块的库（包括 APScheduler）
+logging.Formatter.converter = time.localtime
 
 
 class LocalTimeFormatter(logging.Formatter):
     """使用本地时区的日志格式化器"""
-
-    converter = time.localtime  # 使用本地时间而不是 gmtime
-
-    def formatTime(self, record, datefmt=None):
-        """重写 formatTime 方法，使用本地时间而不是 UTC"""
-        ct = self.converter(record.created)
-        if datefmt:
-            s = time.strftime(datefmt, ct)
-        else:
-            s = time.strftime('%Y-%m-%d %H:%M:%S', ct)
-        return s
+    pass  # converter 已经在全局设置
 
 
 def setup_logger():
