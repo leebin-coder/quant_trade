@@ -269,23 +269,48 @@ class StockDailyFetcher:
             股票信息列表，包含 stockCode, stockName, listDate 等
         """
         try:
+            url = f"{self.api_base_url}/stocks"
+            logger.info(f"  请求URL: {url}")
+
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.get(
-                    f"{self.api_base_url}/stocks",
+                    url,
                     headers=self.headers
                 )
+
+                logger.info(f"  响应状态码: {response.status_code}")
+
                 response.raise_for_status()
 
                 result = response.json()
+                logger.info(f"  响应结果: code={result.get('code')}, message={result.get('message')}")
+
                 if result.get("code") == 200:
-                    stocks = result.get("data", [])
+                    # 从 result.data 中获取数据
+                    data = result.get("data", {})
+
+                    # 如果 data 是字典，从 data.data 中获取列表
+                    if isinstance(data, dict):
+                        stocks = data.get("data", [])
+                    else:
+                        # 如果 data 直接是列表
+                        stocks = data if isinstance(data, list) else []
+
+                    logger.info(f"  获取到 {len(stocks)} 只股票")
+
+                    # 打印前3只股票的信息用于调试
+                    if stocks:
+                        logger.info("  股票数据示例:")
+                        for stock in stocks[:3]:
+                            logger.info(f"    {stock}")
+
                     return stocks
                 else:
                     logger.error(f"获取股票列表失败: {result.get('message')}")
                     return []
 
         except Exception as e:
-            logger.error(f"获取股票列表失败: {str(e)}")
+            logger.error(f"获取股票列表失败: {str(e)}", exc_info=True)
             return []
 
     async def _get_last_trade_date(self, stock_code: str, adjust_flag: int) -> Optional[str]:
@@ -339,7 +364,7 @@ class StockDailyFetcher:
             return stock_code
 
         code, exchange = stock_code.split('.')
-        return f"{exchange.lower()}.{code}"
+        return f"{exchange}.{code}"
 
     async def _get_all_stock_codes(self) -> List[str]:
         """
