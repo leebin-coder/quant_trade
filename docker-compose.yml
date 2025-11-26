@@ -6,6 +6,8 @@ services:
     restart: unless-stopped
 
     # 环境变量
+    environment:
+      - TZ=Asia/Shanghai
     env_file:
       - .env
 
@@ -13,6 +15,7 @@ services:
     volumes:
       - ./logs:/app/logs
       - ./.env:/app/.env
+      - /etc/localtime:/etc/localtime:ro
 
     # 资源限制
     deploy:
