@@ -269,7 +269,7 @@ class StockDailyFetcher:
             股票信息列表，包含 stockCode, stockName, listDate 等
         """
         try:
-            url = f"{self.api_base_url}/stocks"
+            url = f"{self.api_base_url}/stocks/all"
             logger.info(f"  请求URL: {url}")
 
             async with httpx.AsyncClient(timeout=30.0) as client:
