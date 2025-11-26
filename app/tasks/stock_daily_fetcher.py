@@ -553,7 +553,6 @@ class StockDailyFetcher:
                 frequency="d",
                 adjustflag=str(adjust_flag)
             )
-            logger.error(f"        Baostock 查询结果: {rs.get_row_data}")
             if rs.error_code != '0':
                 logger.error(f"        Baostock 查询失败: {rs.error_msg}")
                 return []
