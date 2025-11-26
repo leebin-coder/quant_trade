@@ -43,7 +43,7 @@ class StockDailyFetcher:
     async def sync_stock_daily(self):
         """
         同步股票日线数据
-        每天下午5:20执行一次
+        每天下午5:30执行一次
 
         流程：
         1. 查询数据库中最新的日线数据日期
