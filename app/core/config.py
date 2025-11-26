@@ -47,9 +47,9 @@ class Settings(BaseSettings):
     trading_calendar_schedule_minute: int = Field(0, env="TRADING_CALENDAR_SCHEDULE_MINUTE")  # 分钟
     trading_calendar_schedule_day_of_week: str = Field("*", env="TRADING_CALENDAR_SCHEDULE_DAY_OF_WEEK")  # 每天
 
-    # 股票日线数据获取调度配置（每天下午4:00执行）
-    stock_daily_schedule_hour: int = Field(16, env="STOCK_DAILY_SCHEDULE_HOUR")  # 小时（24小时制）
-    stock_daily_schedule_minute: int = Field(0, env="STOCK_DAILY_SCHEDULE_MINUTE")  # 分钟
+    # 股票日线数据获取调度配置（每天下午5:20执行）
+    stock_daily_schedule_hour: int = Field(17, env="STOCK_DAILY_SCHEDULE_HOUR")  # 小时（24小时制）
+    stock_daily_schedule_minute: int = Field(20, env="STOCK_DAILY_SCHEDULE_MINUTE")  # 分钟
     stock_daily_schedule_day_of_week: str = Field("*", env="STOCK_DAILY_SCHEDULE_DAY_OF_WEEK")  # 每天
 
     # 日志配置
