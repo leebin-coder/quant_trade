@@ -3,8 +3,6 @@
 从 Baostock 获取日线数据并同步到本地数据库
 """
 import asyncio
-import json
-
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from threading import Lock
@@ -555,7 +553,7 @@ class StockDailyFetcher:
                 frequency="d",
                 adjustflag=str(adjust_flag)
             )
-            logger.error(f"        Baostock 查询结果: {json.dumps(rs)}")
+            logger.error(f"        Baostock 查询结果: {rs.get_row_data}")
             if rs.error_code != '0':
                 logger.error(f"        Baostock 查询失败: {rs.error_msg}")
                 return []
