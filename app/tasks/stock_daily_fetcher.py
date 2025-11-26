@@ -1,13 +1,13 @@
 """
 股票日线数据获取任务
-从 Tushare 获取日线数据并同步到本地数据库
+从 Baostock 获取日线数据并同步到本地数据库
 """
 import asyncio
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 import time
 
-import tushare as ts
+import baostock as bs
 import httpx
 import pandas as pd
 
@@ -27,178 +27,153 @@ class StockDailyFetcher:
             "Content-Type": "application/json",
             "Authorization": f"Bearer {settings.stock_api_token}"
         }
-        # 初始化 tushare pro
-        self.tushare_token = "347ae3b92b9a97638f155512bc599767558b94c3dcb47f5abd058b95"
-        ts.set_token(self.tushare_token)
-        self.pro = ts.pro_api()
+        # Baostock 登录状态
+        self.bs_logged_in = False
 
-        # 频率限制控制
-        self.request_count = 0  # 当前分钟内的请求计数
-        self.request_limit = 45  # 每分钟最大请求次数
-        self.minute_start_time = None  # 第一次请求的时间，用于计算一分钟周期
-        self.max_retries = 3  # 单次请求最大重试次数
-        self.retry_delay = 5  # 每次重试等待时间（秒）
-        self.final_retry_delay = 60  # 三次失败后的最终重试等待时间（秒）
+        # 频率限制控制（Baostock 没有严格限制，但建议适当控制）
+        self.request_count = 0
+        self.request_limit = 100  # 每分钟最大请求次数
+        self.minute_start_time = None
+        self.max_retries = 3
+        self.retry_delay = 2  # 重试等待时间（秒）
+        self.final_retry_delay = 30  # 最终重试等待时间（秒）
 
     async def sync_stock_daily(self):
         """
-        同步股票日线数据
-        每天下午5:30执行一次
+        同步股票日线数据（从 Baostock）
+        每天下午4:00执行
 
         流程：
-        1. 查询数据库中最新的日线数据日期
-        2. 如果没有则从1990年开始查交易日，获取到距今天最近的一个交易日（包括今天）的所有交易日
-        3. 如果有最新日期：
-           - 今天是交易日且返回的日期是今天 → 直接结束
-           - 今天是交易日且返回的日期是前一个交易日 → 只查今天
-           - 今天不是交易日 → 从返回的日期开始查到今天前的一个交易日
-        4. 拿到所有要查的交易日后，开始一天一天的查 Tushare（不传股票代码）
-        5. 从 Tushare 查到数据后直接调用后端接口保存
+        1. 获取所有股票基本信息
+        2. 遍历每只股票，查询3种复权类型（后复权、前复权、不复权）的最后交易日
+        3. 根据最后交易日确定查询起始日期，从 Baostock 获取数据
+        4. 汇总3种复权类型的数据，批量插入数据库（1000条/批）
+        5. 处理完一只股票后再处理下一只
         """
         logger.info("=" * 80)
-        logger.info("开始同步股票日线数据...")
+        logger.info("开始同步股票日线数据（Baostock）...")
         logger.info(f"执行时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         logger.info("=" * 80)
 
         try:
-            # 1. 查询数据库中最新的日线数据日期
-            logger.info("📊 步骤1: 查询数据库中最新的日线数据日期...")
-            latest_date = await self._get_latest_daily_date()
-
-            # 2. 获取交易日历（到今天为止）
-            today = datetime.now().strftime("%Y-%m-%d")
-            logger.info("\n📊 步骤2: 获取交易日历...")
-
-            if latest_date:
-                logger.info(f"✓ 数据库中最新日线数据日期: {latest_date}")
-                # 获取从最新日期所在年到今年的交易日历
-                start_year = datetime.strptime(latest_date, "%Y-%m-%d").year
-                current_year = datetime.now().year
-                trade_dates = []
-                for year in range(start_year, current_year + 1):
-                    logger.info(f"  获取 {year} 年交易日历...")
-                    year_dates = await self._get_trade_calendar(year)
-                    trade_dates.extend(year_dates)
-                    await asyncio.sleep(0.1)
-                trade_dates.sort()
-            else:
-                logger.info("✓ 数据库中没有日线数据，从1990年开始查询交易日历")
-                # 从1990年开始查询所有交易日历到今天
-                trade_dates = await self._get_trade_calendar_from_1990()
-
-            if not trade_dates:
-                logger.warning("⚠️  未获取到交易日历数据，任务结束")
+            # Step 1: 获取所有股票基本信息
+            logger.info("\n📊 步骤1: 获取所有股票基本信息...")
+            stocks = await self._get_all_stocks()
+            if not stocks:
+                logger.warning("⚠️  未获取到股票信息，任务结束")
                 return
 
-            # 只保留到今天为止的交易日（包括今天）
-            trade_dates = [d for d in trade_dates if d <= today]
-            logger.info(f"✓ 共获取 {len(trade_dates)} 个交易日（截止到今天）")
+            logger.info(f"✓ 共获取 {len(stocks)} 只股票")
 
-            # 3. 确定需要同步的交易日期范围
-            logger.info("\n📊 步骤3: 确定需要同步的日期范围...")
+            # 登录 Baostock
+            logger.info("\n📊 登录 Baostock...")
+            await self._bs_login()
 
-            if latest_date:
-                # 检查今天是否是交易日
-                is_today_trading = today in trade_dates
-
-                if is_today_trading:
-                    if latest_date == today:
-                        # 今天是交易日且返回的日期是今天 → 直接结束
-                        logger.info("✓ 最新数据已是今天，无需同步")
-                        return
-                    else:
-                        # 今天是交易日且返回的日期不是今天
-                        # 找到最新日期的下一个交易日
-                        if latest_date in trade_dates:
-                            latest_idx = trade_dates.index(latest_date)
-                            # 获取从下一个交易日到今天的所有交易日
-                            dates_to_sync = trade_dates[latest_idx + 1:]
-                            dates_to_sync = [d for d in dates_to_sync if d <= today]
-                        else:
-                            # 如果最新日期不在交易日列表中，从最新日期之后的第一个交易日开始
-                            dates_to_sync = [d for d in trade_dates if d > latest_date and d <= today]
-
-                        if not dates_to_sync:
-                            logger.info("✓ 已是最新数据，无需同步")
-                            return
-                else:
-                    # 今天不是交易日 → 从返回的日期的下一个交易日查到今天前的一个交易日
-                    if latest_date in trade_dates:
-                        latest_idx = trade_dates.index(latest_date)
-                        # 获取从下一个交易日开始的所有交易日（今天不是交易日，所以不会包含今天）
-                        dates_to_sync = trade_dates[latest_idx + 1:]
-                        dates_to_sync = [d for d in dates_to_sync if d < today]
-                    else:
-                        # 如果最新日期不在交易日列表中，从最新日期之后的第一个交易日开始
-                        dates_to_sync = [d for d in trade_dates if d > latest_date and d < today]
-
-                    if not dates_to_sync:
-                        logger.info("✓ 今天不是交易日，且已是最新数据，无需同步")
-                        return
-
-                logger.info(f"✓ 需要同步 {len(dates_to_sync)} 个交易日的数据")
-                logger.info(f"  起始日期: {dates_to_sync[0]}")
-                logger.info(f"  结束日期: {dates_to_sync[-1]}")
-            else:
-                # 从1990年第一个交易日开始到今天（或今天前的一个交易日）
-                dates_to_sync = trade_dates
-                logger.info(f"✓ 需要同步 {len(dates_to_sync)} 个交易日的数据（从1990年开始）")
-                logger.info(f"  起始日期: {dates_to_sync[0]}")
-                logger.info(f"  结束日期: {dates_to_sync[-1]}")
-
-            # 4. 逐个交易日同步数据（不传股票代码，直接从Tushare按日期查询）
-            logger.info("\n📊 步骤4: 开始逐个交易日从Tushare同步数据...")
-            total_dates = len(dates_to_sync)
+            today = datetime.now().strftime("%Y-%m-%d")
+            total_stocks = len(stocks)
             success_count = 0
             fail_count = 0
 
-            for idx, trade_date in enumerate(dates_to_sync, 1):
-                logger.info(f"\n[{idx}/{total_dates}] 正在同步 {trade_date} 的日线数据...")
+            # Step 2: 遍历每只股票
+            for idx, stock in enumerate(stocks, 1):
+                stock_code = stock.get("stockCode")  # 格式: 000001.SH
+                list_date = stock.get("listDate")  # 上市日期
+                stock_name = stock.get("stockName", "")
+
+                if not stock_code or not list_date:
+                    logger.warning(f"[{idx}/{total_stocks}] 股票信息不完整，跳过")
+                    fail_count += 1
+                    continue
+
+                logger.info(f"\n[{idx}/{total_stocks}] 处理股票: {stock_code} {stock_name}")
+                logger.info(f"  上市日期: {list_date}")
 
                 try:
-                    # 从Tushare获取该交易日的所有股票日线数据（不传股票代码）
-                    daily_data = await self._fetch_daily_by_date(trade_date)
+                    # 转换股票代码格式: 000001.SH -> sh.000001
+                    bs_stock_code = self._convert_stock_code(stock_code)
 
-                    # 检查是否是最终失败（返回None）
-                    if daily_data is None:
-                        logger.error(f"❌ {trade_date} 数据获取最终失败，任务结束")
-                        logger.info("\n" + "=" * 80)
-                        logger.info(f"✗ 股票日线数据同步被中断！")
-                        logger.info(f"  成功: {success_count}/{idx}")
-                        logger.info(f"  失败: {fail_count + 1}/{idx}")
-                        logger.info(f"  中断于: {trade_date}")
-                        logger.info("=" * 80)
-                        return
+                    # Step 3: 查询3种复权类型的最后交易日
+                    logger.info(f"  查询最后交易日...")
+                    adjust_flags = [1, 2, 3]  # 1:后复权 2:前复权 3:不复权
 
-                    if daily_data:
-                        # 直接保存到数据库
-                        saved = await self._save_daily_data(daily_data)
+                    all_daily_data = []
+
+                    for adjust_flag in adjust_flags:
+                        adjust_name = {1: "后复权", 2: "前复权", 3: "不复权"}[adjust_flag]
+                        logger.info(f"    处理 {adjust_name} 数据...")
+
+                        # 查询最后一个交易日
+                        last_trade_date = await self._get_last_trade_date(stock_code, adjust_flag)
+
+                        # Step 4: 确定查询起始日期
+                        if last_trade_date:
+                            # 如果有最后交易日，从最后交易日+1天开始
+                            start_date_obj = datetime.strptime(last_trade_date, "%Y-%m-%d") + timedelta(days=1)
+                            start_date = start_date_obj.strftime("%Y-%m-%d")
+                            logger.info(f"      最后交易日: {last_trade_date}，从 {start_date} 开始查询")
+                        else:
+                            # 如果没有最后交易日，从上市日期开始
+                            start_date = list_date
+                            logger.info(f"      无历史数据，从上市日期 {start_date} 开始查询")
+
+                        # 如果开始日期大于今天，跳过
+                        if start_date > today:
+                            logger.info(f"      开始日期 {start_date} 大于今天，跳过")
+                            continue
+
+                        # 从 Baostock 获取数据
+                        daily_data = await self._fetch_stock_daily_from_baostock(
+                            bs_stock_code,
+                            start_date,
+                            today,
+                            adjust_flag
+                        )
+
+                        if daily_data:
+                            # 转换股票代码格式回 000001.SH
+                            for item in daily_data:
+                                item["stockCode"] = stock_code
+                                item["adjustFlag"] = adjust_flag
+
+                            all_daily_data.extend(daily_data)
+                            logger.info(f"      ✓ 获取 {len(daily_data)} 条数据")
+                        else:
+                            logger.info(f"      无新增数据")
+
+                    # Step 5: 批量插入数据
+                    if all_daily_data:
+                        logger.info(f"  汇总数据: 共 {len(all_daily_data)} 条")
+                        saved = await self._save_daily_data_batch(all_daily_data)
                         if saved:
                             success_count += 1
-                            logger.info(f"✓ {trade_date} 数据保存成功，共 {len(daily_data)} 条记录")
+                            logger.info(f"  ✓ {stock_code} 数据保存成功")
                         else:
                             fail_count += 1
-                            logger.error(f"✗ {trade_date} 数据保存失败")
+                            logger.error(f"  ✗ {stock_code} 数据保存失败")
                     else:
-                        # 空列表，表示该日期没有数据（非交易日或其他原因）
-                        logger.warning(f"⚠️  {trade_date} 未获取到数据")
+                        logger.info(f"  无需更新数据")
+                        success_count += 1
 
                 except Exception as e:
                     fail_count += 1
-                    logger.error(f"✗ {trade_date} 数据同步失败: {str(e)}")
+                    logger.error(f"  ✗ {stock_code} 处理失败: {str(e)}")
                     continue
 
-            # 5. 总结
+            # 登出 Baostock
+            await self._bs_logout()
+
+            # 总结
             logger.info("\n" + "=" * 80)
             logger.info(f"✓ 股票日线数据同步完成！")
-            logger.info(f"  成功: {success_count}/{total_dates}")
-            logger.info(f"  失败: {fail_count}/{total_dates}")
+            logger.info(f"  成功: {success_count}/{total_stocks}")
+            logger.info(f"  失败: {fail_count}/{total_stocks}")
             logger.info("=" * 80)
 
             self.last_fetch_time = datetime.now()
 
         except Exception as e:
             logger.error(f"\n❌ 股票日线数据同步任务执行失败: {str(e)}", exc_info=True)
+            await self._bs_logout()
             raise
 
     async def _get_latest_daily_date(self) -> Optional[str]:
@@ -286,6 +261,86 @@ class StockDailyFetcher:
         logger.info(f"✓ 共获取 {len(all_trade_dates)} 个交易日")
         return all_trade_dates
 
+    async def _get_all_stocks(self) -> List[Dict]:
+        """
+        获取所有股票基本信息
+
+        Returns:
+            股票信息列表，包含 stockCode, stockName, listDate 等
+        """
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(
+                    f"{self.api_base_url}/stocks",
+                    headers=self.headers
+                )
+                response.raise_for_status()
+
+                result = response.json()
+                if result.get("code") == 200:
+                    stocks = result.get("data", [])
+                    return stocks
+                else:
+                    logger.error(f"获取股票列表失败: {result.get('message')}")
+                    return []
+
+        except Exception as e:
+            logger.error(f"获取股票列表失败: {str(e)}")
+            return []
+
+    async def _get_last_trade_date(self, stock_code: str, adjust_flag: int) -> Optional[str]:
+        """
+        查询指定股票和复权类型的最后一个交易日
+
+        Args:
+            stock_code: 股票代码，格式 000001.SH
+            adjust_flag: 复权标识 1:后复权 2:前复权 3:不复权
+
+        Returns:
+            最后交易日，格式 YYYY-MM-DD，如果没有则返回 None
+        """
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(
+                    f"{self.api_base_url}/stock-daily/latest-date",
+                    params={
+                        "stockCode": stock_code,
+                        "adjustFlag": adjust_flag
+                    },
+                    headers=self.headers
+                )
+                response.raise_for_status()
+
+                result = response.json()
+                if result.get("code") == 200:
+                    last_date = result.get("data")
+                    # 判断是否为有效日期
+                    if not last_date or (isinstance(last_date, str) and last_date.lower() in ["null", ""]):
+                        return None
+                    return last_date
+                else:
+                    return None
+
+        except Exception as e:
+            logger.error(f"查询最后交易日失败: {str(e)}")
+            return None
+
+    def _convert_stock_code(self, stock_code: str) -> str:
+        """
+        转换股票代码格式: 000001.SH -> sh.000001
+
+        Args:
+            stock_code: 原始股票代码，格式 000001.SH
+
+        Returns:
+            Baostock 格式的股票代码，格式 sh.000001
+        """
+        if '.' not in stock_code:
+            return stock_code
+
+        code, exchange = stock_code.split('.')
+        return f"{exchange.lower()}.{code}"
+
     async def _get_all_stock_codes(self) -> List[str]:
         """
         获取所有股票代码
@@ -311,6 +366,103 @@ class StockDailyFetcher:
 
         except Exception as e:
             logger.error(f"获取股票代码列表失败: {str(e)}")
+            return []
+
+    async def _bs_login(self):
+        """登录 Baostock"""
+        try:
+            lg = bs.login()
+            if lg.error_code == '0':
+                self.bs_logged_in = True
+                logger.info("✓ Baostock 登录成功")
+            else:
+                logger.error(f"✗ Baostock 登录失败: {lg.error_msg}")
+                raise Exception(f"Baostock 登录失败: {lg.error_msg}")
+        except Exception as e:
+            logger.error(f"✗ Baostock 登录异常: {str(e)}")
+            raise
+
+    async def _bs_logout(self):
+        """登出 Baostock"""
+        try:
+            if self.bs_logged_in:
+                bs.logout()
+                self.bs_logged_in = False
+                logger.info("✓ Baostock 登出成功")
+        except Exception as e:
+            logger.error(f"✗ Baostock 登出异常: {str(e)}")
+
+    async def _fetch_stock_daily_from_baostock(
+        self, stock_code: str, start_date: str, end_date: str, adjust_flag: int = 3
+    ) -> List[Dict]:
+        """
+        从 Baostock 获取股票日线数据
+
+        Args:
+            stock_code: 股票代码，格式如 "sh.601398"
+            start_date: 开始日期，格式 YYYY-MM-DD
+            end_date: 结束日期，格式 YYYY-MM-DD
+            adjust_flag: 复权标识 1:后复权 2:前复权 3:不复权
+
+        Returns:
+            日线数据列表
+        """
+        try:
+            # 调用 Baostock API
+            # frequency="d" 表示日线
+            # adjustflag: "1"=后复权 "2"=前复权 "3"=不复权
+            rs = bs.query_history_k_data_plus(
+                stock_code,
+                "date,code,open,high,low,close,preclose,volume,amount,adjustflag,turn,tradestatus,pctChg,peTTM,psTTM,pcfNcfTTM,pbMRQ,isST",
+                start_date=start_date,
+                end_date=end_date,
+                frequency="d",
+                adjustflag=str(adjust_flag)
+            )
+
+            if rs.error_code != '0':
+                logger.error(f"        Baostock 查询失败: {rs.error_msg}")
+                return []
+
+            # 获取数据
+            data_list = []
+            while (rs.error_code == '0') & rs.next():
+                row = rs.get_row_data()
+
+                # 转换数据格式，与后端字段对应
+                # 字段顺序: date,code,open,high,low,close,preclose,volume,amount,adjustflag,turn,tradestatus,pctChg,peTTM,psTTM,pcfNcfTTM,pbMRQ,isST
+                daily_item = {
+                    "stockCode": row[1],  # code (会在外层被替换为 000001.SH 格式)
+                    "tradeDate": row[0],  # date
+                    "openPrice": float(row[2]) if row[2] else None,  # open
+                    "highPrice": float(row[3]) if row[3] else None,  # high
+                    "lowPrice": float(row[4]) if row[4] else None,  # low
+                    "closePrice": float(row[5]) if row[5] else None,  # close
+                    "preClose": float(row[6]) if row[6] else None,  # preclose
+                    "volume": float(row[7]) if row[7] else None,  # volume
+                    "amount": float(row[8]) if row[8] else None,  # amount
+                    "adjustFlag": adjust_flag,  # adjustFlag (会在外层被设置)
+                    "turn": float(row[10]) if row[10] else None,  # turn (换手率)
+                    "tradeStatus": int(row[11]) if row[11] else None,  # tradestatus (1正常 0停牌)
+                    "pctChange": float(row[12]) if row[12] else None,  # pctChg (涨跌幅)
+                    "changeAmount": None,  # changeAmount (涨跌额，Baostock不提供，需要计算)
+                    "peTtm": float(row[13]) if row[13] else None,  # peTTM
+                    "psTtm": float(row[14]) if row[14] else None,  # psTTM
+                    "pcfNcfTtm": float(row[15]) if row[15] else None,  # pcfNcfTTM
+                    "pbMrq": float(row[16]) if row[16] else None,  # pbMRQ
+                    "isSt": int(row[17]) if row[17] else 0  # isST (1是 0否)
+                }
+
+                # 计算涨跌额 changeAmount = closePrice - preClose
+                if daily_item["closePrice"] is not None and daily_item["preClose"] is not None:
+                    daily_item["changeAmount"] = daily_item["closePrice"] - daily_item["preClose"]
+
+                data_list.append(daily_item)
+
+            return data_list
+
+        except Exception as e:
+            logger.error(f"        从 Baostock 获取数据异常: {str(e)}")
             return []
 
     async def _fetch_daily_by_date(self, trade_date: str) -> List[Dict]:
@@ -454,6 +606,63 @@ class StockDailyFetcher:
             self.request_count = 0
             self.minute_start_time = time.time()
             logger.info(f"⏱️  新的一分钟开始，重置计数器")
+
+    async def _save_daily_data_batch(self, daily_data: List[Dict]) -> bool:
+        """
+        批量保存日线数据到数据库（分批插入，每批1000条）
+
+        Args:
+            daily_data: 日线数据列表
+
+        Returns:
+            是否全部保存成功
+        """
+        if not daily_data:
+            return False
+
+        try:
+            total = len(daily_data)
+            batch_size = self.batch_size  # 1000
+            batches = (total + batch_size - 1) // batch_size  # 向上取整
+
+            logger.info(f"  开始批量保存，共 {total} 条数据，分 {batches} 批")
+
+            success_count = 0
+            fail_count = 0
+
+            for i in range(0, total, batch_size):
+                batch = daily_data[i:i + batch_size]
+                batch_num = i // batch_size + 1
+
+                logger.info(f"    批次 {batch_num}/{batches}: 正在保存 {len(batch)} 条...")
+
+                try:
+                    async with httpx.AsyncClient(timeout=None) as client:
+                        response = await client.post(
+                            f"{self.api_base_url}/stock-daily/batch",
+                            json=batch,
+                            headers=self.headers
+                        )
+                        response.raise_for_status()
+
+                        result = response.json()
+                        if result.get("code") == 200:
+                            success_count += len(batch)
+                            logger.info(f"    批次 {batch_num}/{batches}: ✓ 保存成功")
+                        else:
+                            fail_count += len(batch)
+                            logger.error(f"    批次 {batch_num}/{batches}: ✗ 保存失败 - {result.get('message')}")
+
+                except Exception as e:
+                    fail_count += len(batch)
+                    logger.error(f"    批次 {batch_num}/{batches}: ✗ 保存异常 - {str(e)}")
+
+            logger.info(f"  批量保存完成: 成功 {success_count}/{total}, 失败 {fail_count}/{total}")
+            return fail_count == 0
+
+        except Exception as e:
+            logger.error(f"  批量保存失败: {str(e)}")
+            return False
 
     async def _save_daily_data(self, daily_data: List[Dict]) -> bool:
         """

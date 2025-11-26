@@ -86,7 +86,7 @@ class TaskRunner:
     async def run_stock_daily_sync(self):
         """
         运行股票日线数据同步任务
-        从 Tushare 获取日线数据并同步到数据库
+        从 Baostock 获取日线数据（3种复权类型）并同步到数据库
         """
         logger.info("=" * 80)
         logger.info("手动执行：股票日线数据同步任务")
@@ -121,8 +121,9 @@ def print_menu():
     print("   - 智能判断并增量更新")
     print()
     print("4. 执行股票日线数据同步任务")
-    print("   - 从 Tushare 获取日线数据")
-    print("   - 逐个交易日同步，控制API频率")
+    print("   - 从 Baostock 获取日线数据")
+    print("   - 遍历所有股票，获取3种复权类型数据")
+    print("   - 批量插入数据库（1000条/批）")
     print()
     print("0. 退出")
     print("=" * 60)
