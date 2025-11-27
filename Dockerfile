@@ -10,6 +10,10 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     TZ=Asia/Shanghai
 
+# 配置 Debian 镜像源（使用阿里云镜像加速）
+RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources && \
+    sed -i 's/security.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources
+
 # 安装系统依赖
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
@@ -21,6 +25,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # 复制依赖文件
 COPY pyproject.toml ./
+
+# 配置 pip 使用国内镜像源（阿里云）
+RUN pip config set global.index-url https://mirrors.aliyun.com/pypi/simple/ && \
+    pip config set global.trusted-host mirrors.aliyun.com
 
 # 安装 Python 依赖
 RUN pip install --upgrade pip && \
