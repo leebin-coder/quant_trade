@@ -1,4 +1,5 @@
-FROM python:3.11-slim
+# 使用阿里云镜像仓库（更稳定）
+FROM registry.cn-hangzhou.aliyuncs.com/library/python:3.11-slim
 
 # 设置工作目录
 WORKDIR /app
