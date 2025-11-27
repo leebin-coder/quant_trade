@@ -51,7 +51,7 @@ class Settings(BaseSettings):
     stock_daily_schedule_hour: int = Field(16, env="STOCK_DAILY_SCHEDULE_HOUR")  # 小时（24小时制）
     stock_daily_schedule_minute: int = Field(0, env="STOCK_DAILY_SCHEDULE_MINUTE")  # 分钟
     stock_daily_schedule_day_of_week: str = Field("*", env="STOCK_DAILY_SCHEDULE_DAY_OF_WEEK")  # 每天
-    stock_daily_max_workers: int = Field(10, env="STOCK_DAILY_MAX_WORKERS")  # 日线数据同步最大并发线程数
+    stock_daily_max_workers: int = Field(2, env="STOCK_DAILY_MAX_WORKERS")  # 日线数据同步最大并发线程数（推荐2-3，Baostock服务器不稳定）
 
     # 日志配置
     log_level: str = Field("INFO", env="LOG_LEVEL")
