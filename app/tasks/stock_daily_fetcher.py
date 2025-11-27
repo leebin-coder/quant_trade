@@ -467,6 +467,9 @@ class StockDailyFetcher:
                 if start_date > today:
                     continue
 
+                # 查询前短暂延迟，给 Baostock 服务器缓冲时间
+                time.sleep(random.uniform(0.3, 0.8))
+
                 # 从 Baostock 获取数据（同步调用）
                 daily_data = self._fetch_stock_daily_from_baostock_sync(
                     bs_stock_code,
@@ -585,8 +588,8 @@ class StockDailyFetcher:
         Returns:
             日线数据列表
         """
-        max_retries = 5  # 增加重试次数
-        base_retry_delay = 2  # 基础重试延迟（秒）
+        max_retries = 10  # 大幅增加重试次数（Baostock 太不稳定）
+        base_retry_delay = 3  # 基础重试延迟（秒）
 
         for attempt in range(max_retries):
             try:
