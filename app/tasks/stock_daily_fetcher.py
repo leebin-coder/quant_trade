@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from threading import Lock
 from typing import Dict, List, Optional
 import time
+import random
 
 import baostock as bs
 import httpx
@@ -404,6 +405,9 @@ class StockDailyFetcher:
         # 这里简化日志输出，避免日志混乱
         logger.debug(f"[{idx}/{total_stocks}] 处理股票: {stock_code} {stock_name}")
 
+        # 添加随机延迟，避免所有线程同时请求 Baostock (0-2秒)
+        time.sleep(random.uniform(0, 2))
+
         # 每个线程独立登录 Baostock
         try:
             lg = bs.login()
@@ -453,6 +457,9 @@ class StockDailyFetcher:
                         item["adjustFlag"] = adjust_flag
 
                     all_daily_data.extend(daily_data)
+
+                # 每次查询后短暂延迟，避免请求过快
+                time.sleep(0.1)
 
             # 批量插入数据
             if all_daily_data:
@@ -542,7 +549,7 @@ class StockDailyFetcher:
         self, stock_code: str, start_date: str, end_date: str, adjust_flag: int = 3
     ) -> List[Dict]:
         """
-        从 Baostock 获取股票日线数据（同步版本）
+        从 Baostock 获取股票日线数据（同步版本，带重试机制）
 
         Args:
             stock_code: 股票代码，格式如 "sh.601398"
@@ -553,58 +560,75 @@ class StockDailyFetcher:
         Returns:
             日线数据列表
         """
-        try:
-            # 调用 Baostock API
-            rs = bs.query_history_k_data_plus(
-                stock_code,
-                "date,code,open,high,low,close,preclose,volume,amount,adjustflag,turn,tradestatus,pctChg,peTTM,psTTM,pcfNcfTTM,pbMRQ,isST",
-                start_date=start_date,
-                end_date=end_date,
-                frequency="d",
-                adjustflag=str(adjust_flag)
-            )
-            if rs.error_code != '0':
-                logger.error(f"        Baostock 查询失败: {rs.error_msg}")
-                return []
+        max_retries = 3
+        retry_delay = 1  # 重试延迟（秒）
 
-            # 获取数据
-            data_list = []
-            while (rs.error_code == '0') & rs.next():
-                row = rs.get_row_data()
+        for attempt in range(max_retries):
+            try:
+                # 调用 Baostock API
+                rs = bs.query_history_k_data_plus(
+                    stock_code,
+                    "date,code,open,high,low,close,preclose,volume,amount,adjustflag,turn,tradestatus,pctChg,peTTM,psTTM,pcfNcfTTM,pbMRQ,isST",
+                    start_date=start_date,
+                    end_date=end_date,
+                    frequency="d",
+                    adjustflag=str(adjust_flag)
+                )
 
-                daily_item = {
-                    "stockCode": row[1],
-                    "tradeDate": row[0],
-                    "openPrice": float(row[2]) if row[2] else None,
-                    "highPrice": float(row[3]) if row[3] else None,
-                    "lowPrice": float(row[4]) if row[4] else None,
-                    "closePrice": float(row[5]) if row[5] else None,
-                    "preClose": float(row[6]) if row[6] else None,
-                    "volume": float(row[7]) if row[7] else None,
-                    "amount": float(row[8]) if row[8] else None,
-                    "adjustFlag": adjust_flag,
-                    "turn": float(row[10]) if row[10] else None,
-                    "tradeStatus": int(row[11]) if row[11] else None,
-                    "pctChange": float(row[12]) if row[12] else None,
-                    "changeAmount": None,
-                    "peTtm": float(row[13]) if row[13] else None,
-                    "psTtm": float(row[14]) if row[14] else None,
-                    "pcfNcfTtm": float(row[15]) if row[15] else None,
-                    "pbMrq": float(row[16]) if row[16] else None,
-                    "isSt": int(row[17]) if row[17] else 0
-                }
+                if rs.error_code != '0':
+                    if attempt < max_retries - 1:
+                        logger.debug(f"        Baostock 查询失败 (尝试 {attempt + 1}/{max_retries}): {rs.error_msg}，{retry_delay}秒后重试...")
+                        time.sleep(retry_delay)
+                        continue
+                    else:
+                        logger.error(f"        Baostock 查询失败 (已重试{max_retries}次): {rs.error_msg}")
+                        return []
 
-                # 计算涨跌额
-                if daily_item["closePrice"] is not None and daily_item["preClose"] is not None:
-                    daily_item["changeAmount"] = daily_item["closePrice"] - daily_item["preClose"]
+                # 获取数据
+                data_list = []
+                while (rs.error_code == '0') & rs.next():
+                    row = rs.get_row_data()
 
-                data_list.append(daily_item)
+                    daily_item = {
+                        "stockCode": row[1],
+                        "tradeDate": row[0],
+                        "openPrice": float(row[2]) if row[2] else None,
+                        "highPrice": float(row[3]) if row[3] else None,
+                        "lowPrice": float(row[4]) if row[4] else None,
+                        "closePrice": float(row[5]) if row[5] else None,
+                        "preClose": float(row[6]) if row[6] else None,
+                        "volume": float(row[7]) if row[7] else None,
+                        "amount": float(row[8]) if row[8] else None,
+                        "adjustFlag": adjust_flag,
+                        "turn": float(row[10]) if row[10] else None,
+                        "tradeStatus": int(row[11]) if row[11] else None,
+                        "pctChange": float(row[12]) if row[12] else None,
+                        "changeAmount": None,
+                        "peTtm": float(row[13]) if row[13] else None,
+                        "psTtm": float(row[14]) if row[14] else None,
+                        "pcfNcfTtm": float(row[15]) if row[15] else None,
+                        "pbMrq": float(row[16]) if row[16] else None,
+                        "isSt": int(row[17]) if row[17] else 0
+                    }
 
-            return data_list
+                    # 计算涨跌额
+                    if daily_item["closePrice"] is not None and daily_item["preClose"] is not None:
+                        daily_item["changeAmount"] = daily_item["closePrice"] - daily_item["preClose"]
 
-        except Exception as e:
-            logger.error(f"        从 Baostock 获取数据异常: {str(e)}")
-            return []
+                    data_list.append(daily_item)
+
+                return data_list
+
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    logger.debug(f"        从 Baostock 获取数据异常 (尝试 {attempt + 1}/{max_retries}): {str(e)}，{retry_delay}秒后重试...")
+                    time.sleep(retry_delay)
+                    continue
+                else:
+                    logger.error(f"        从 Baostock 获取数据异常 (已重试{max_retries}次): {str(e)}")
+                    return []
+
+        return []
 
     def _save_daily_data_batch_sync(self, daily_data: List[Dict]) -> bool:
         """
