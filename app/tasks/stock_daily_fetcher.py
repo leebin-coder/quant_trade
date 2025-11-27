@@ -74,10 +74,6 @@ class StockDailyFetcher:
 
             logger.info(f"✓ 共获取 {len(stocks)} 只股票")
 
-            # 登录 Baostock
-            logger.info("\n📊 登录 Baostock...")
-            await self._bs_login()
-
             today = datetime.now().strftime("%Y-%m-%d")
             total_stocks = len(stocks)
 
@@ -89,6 +85,7 @@ class StockDailyFetcher:
             # Step 2: 使用线程池并发处理
             logger.info(f"\n📊 步骤2: 开始并发处理股票数据...")
             logger.info(f"  线程池大小: {self.max_workers}")
+            logger.info(f"  注意: 每个线程将独立登录 Baostock")
 
             start_time = time.time()
 
@@ -100,9 +97,6 @@ class StockDailyFetcher:
                 stocks,
                 today
             )
-
-            # 登出 Baostock
-            await self._bs_logout()
 
             # 计算耗时
             elapsed_time = time.time() - start_time
@@ -122,7 +116,6 @@ class StockDailyFetcher:
 
         except Exception as e:
             logger.error(f"\n❌ 股票日线数据同步任务执行失败: {str(e)}", exc_info=True)
-            await self._bs_logout()
             raise
 
     def _process_stocks_in_threadpool(self, stocks: List[Dict], today: str):
@@ -388,6 +381,7 @@ class StockDailyFetcher:
     def _process_single_stock(self, stock: Dict, idx: int, total_stocks: int, today: str) -> bool:
         """
         处理单个股票的日线数据同步（同步方法，用于线程池执行）
+        每个线程独立登录 Baostock，避免线程安全问题
 
         Args:
             stock: 股票信息字典
@@ -409,6 +403,16 @@ class StockDailyFetcher:
         # 注意: 由于使用了多线程，日志输出可能会交错显示
         # 这里简化日志输出，避免日志混乱
         logger.debug(f"[{idx}/{total_stocks}] 处理股票: {stock_code} {stock_name}")
+
+        # 每个线程独立登录 Baostock
+        try:
+            lg = bs.login()
+            if lg.error_code != '0':
+                logger.error(f"  ✗ {stock_code} Baostock登录失败: {lg.error_msg}")
+                return False
+        except Exception as e:
+            logger.error(f"  ✗ {stock_code} Baostock登录异常: {str(e)}")
+            return False
 
         try:
             # 转换股票代码格式: 000001.SH -> sh.000001
@@ -466,6 +470,12 @@ class StockDailyFetcher:
         except Exception as e:
             logger.error(f"  ✗ {stock_code} 处理失败: {str(e)}")
             return False
+        finally:
+            # 每个线程结束时登出 Baostock
+            try:
+                bs.logout()
+            except Exception as e:
+                logger.debug(f"  {stock_code} Baostock登出异常: {str(e)}")
 
     async def _bs_login(self):
         """登录 Baostock"""
@@ -675,7 +685,7 @@ class StockDailyFetcher:
                 frequency="d",
                 adjustflag=str(adjust_flag)
             )
-            logger.error(f"        Baostock 查询结果: {rs}")
+
             if rs.error_code != '0':
                 logger.error(f"        Baostock 查询失败: {rs.error_msg}")
                 return []
