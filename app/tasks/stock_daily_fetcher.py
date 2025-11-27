@@ -47,6 +47,7 @@ class StockDailyFetcher:
         self.fail_count = 0
         self.processed_count = 0  # 已处理数量
         self.count_lock = Lock()  # 线程安全的计数器锁
+        self.login_lock = Lock()  # Baostock 登录锁，确保登录串行化
 
     async def sync_stock_daily(self):
         """
@@ -405,17 +406,41 @@ class StockDailyFetcher:
         # 这里简化日志输出，避免日志混乱
         logger.debug(f"[{idx}/{total_stocks}] 处理股票: {stock_code} {stock_name}")
 
-        # 添加随机延迟，避免所有线程同时请求 Baostock (0.5-3秒)
-        time.sleep(random.uniform(0.5, 3))
+        # 添加随机延迟，避免所有线程同时请求 Baostock (1-5秒，增加延迟范围)
+        time.sleep(random.uniform(1, 5))
 
-        # 每个线程独立登录 Baostock
-        try:
-            lg = bs.login()
-            if lg.error_code != '0':
-                logger.error(f"  ✗ {stock_code} Baostock登录失败: {lg.error_msg}")
-                return False
-        except Exception as e:
-            logger.error(f"  ✗ {stock_code} Baostock登录异常: {str(e)}")
+        # 每个线程独立登录 Baostock，使用锁确保登录串行化
+        # 这样可以避免多个线程同时登录导致服务器压力过大
+        max_login_retries = 3
+        login_success = False
+
+        for login_attempt in range(max_login_retries):
+            try:
+                # 使用锁确保同一时间只有一个线程在登录
+                with self.login_lock:
+                    lg = bs.login()
+                    if lg.error_code == '0':
+                        login_success = True
+                        # 登录成功后短暂延迟，让服务器缓一下
+                        time.sleep(0.5)
+                        break
+                    else:
+                        if login_attempt < max_login_retries - 1:
+                            logger.debug(f"  {stock_code} Baostock登录失败 (尝试 {login_attempt + 1}/{max_login_retries}): {lg.error_msg}，2秒后重试...")
+                            time.sleep(2)
+                        else:
+                            logger.error(f"  ✗ {stock_code} Baostock登录失败 (已重试{max_login_retries}次): {lg.error_msg}")
+                            return False
+            except Exception as e:
+                if login_attempt < max_login_retries - 1:
+                    logger.debug(f"  {stock_code} Baostock登录异常 (尝试 {login_attempt + 1}/{max_login_retries}): {str(e)}，2秒后重试...")
+                    time.sleep(2)
+                else:
+                    logger.error(f"  ✗ {stock_code} Baostock登录异常 (已重试{max_login_retries}次): {str(e)}")
+                    return False
+
+        if not login_success:
+            logger.error(f"  ✗ {stock_code} Baostock登录最终失败")
             return False
 
         try:
