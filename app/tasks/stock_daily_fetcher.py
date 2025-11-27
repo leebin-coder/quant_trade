@@ -405,8 +405,8 @@ class StockDailyFetcher:
         # 这里简化日志输出，避免日志混乱
         logger.debug(f"[{idx}/{total_stocks}] 处理股票: {stock_code} {stock_name}")
 
-        # 添加随机延迟，避免所有线程同时请求 Baostock (0-2秒)
-        time.sleep(random.uniform(0, 2))
+        # 添加随机延迟，避免所有线程同时请求 Baostock (0.5-3秒)
+        time.sleep(random.uniform(0.5, 3))
 
         # 每个线程独立登录 Baostock
         try:
@@ -458,8 +458,8 @@ class StockDailyFetcher:
 
                     all_daily_data.extend(daily_data)
 
-                # 每次查询后短暂延迟，避免请求过快
-                time.sleep(0.1)
+                # 每次查询后短暂延迟，避免请求过快 (0.2-0.5秒)
+                time.sleep(random.uniform(0.2, 0.5))
 
             # 批量插入数据
             if all_daily_data:
@@ -560,8 +560,8 @@ class StockDailyFetcher:
         Returns:
             日线数据列表
         """
-        max_retries = 3
-        retry_delay = 1  # 重试延迟（秒）
+        max_retries = 5  # 增加重试次数
+        base_retry_delay = 2  # 基础重试延迟（秒）
 
         for attempt in range(max_retries):
             try:
@@ -577,7 +577,9 @@ class StockDailyFetcher:
 
                 if rs.error_code != '0':
                     if attempt < max_retries - 1:
-                        logger.debug(f"        Baostock 查询失败 (尝试 {attempt + 1}/{max_retries}): {rs.error_msg}，{retry_delay}秒后重试...")
+                        # 指数退避：每次重试延迟时间递增
+                        retry_delay = base_retry_delay * (attempt + 1)
+                        logger.debug(f"        Baostock 查询失败 (尝试 {attempt + 1}/{max_retries}): {rs.error_msg}，等待{retry_delay}秒后重试...")
                         time.sleep(retry_delay)
                         continue
                     else:
@@ -621,7 +623,9 @@ class StockDailyFetcher:
 
             except Exception as e:
                 if attempt < max_retries - 1:
-                    logger.debug(f"        从 Baostock 获取数据异常 (尝试 {attempt + 1}/{max_retries}): {str(e)}，{retry_delay}秒后重试...")
+                    # 指数退避：每次重试延迟时间递增
+                    retry_delay = base_retry_delay * (attempt + 1)
+                    logger.debug(f"        从 Baostock 获取数据异常 (尝试 {attempt + 1}/{max_retries}): {str(e)}，等待{retry_delay}秒后重试...")
                     time.sleep(retry_delay)
                     continue
                 else:
