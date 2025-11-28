@@ -45,6 +45,7 @@ class StockDailyFetcher:
         self.max_workers = settings.stock_daily_max_workers  # 最大并发线程数（从配置文件读取）
         self.success_count = 0
         self.fail_count = 0
+        self.skip_count = 0  # 跳过数量（北交所股票）
         self.processed_count = 0  # 已处理数量
         self.count_lock = Lock()  # 线程安全的计数器锁
         self.login_lock = Lock()  # Baostock 登录锁，确保登录串行化
@@ -82,6 +83,7 @@ class StockDailyFetcher:
             # 重置计数器
             self.success_count = 0
             self.fail_count = 0
+            self.skip_count = 0
             self.processed_count = 0
 
             # Step 2: 使用线程池并发处理
@@ -108,6 +110,7 @@ class StockDailyFetcher:
             logger.info("\n" + "=" * 80)
             logger.info(f"✓ 股票日线数据同步完成！")
             logger.info(f"  成功: {self.success_count}/{total_stocks}")
+            logger.info(f"  跳过: {self.skip_count}/{total_stocks} (北交所股票)")
             logger.info(f"  失败: {self.fail_count}/{total_stocks}")
             logger.info(f"  总耗时: {minutes}分{seconds}秒")
             if total_stocks > 0:
@@ -141,10 +144,12 @@ class StockDailyFetcher:
             for future in as_completed(future_to_stock):
                 stock = future_to_stock[future]
                 try:
-                    success = future.result()
+                    result = future.result()
                     with self.count_lock:
                         self.processed_count += 1
-                        if success:
+                        if result == "skip":
+                            self.skip_count += 1
+                        elif result:
                             self.success_count += 1
                         else:
                             self.fail_count += 1
@@ -154,7 +159,7 @@ class StockDailyFetcher:
                             progress = (self.processed_count / total_stocks) * 100
                             logger.info(
                                 f"  进度: {self.processed_count}/{total_stocks} ({progress:.1f}%) | "
-                                f"成功: {self.success_count} | 失败: {self.fail_count}"
+                                f"成功: {self.success_count} | 跳过: {self.skip_count} | 失败: {self.fail_count}"
                             )
 
                 except Exception as e:
@@ -340,6 +345,7 @@ class StockDailyFetcher:
     def _convert_stock_code(self, stock_code: str) -> str:
         """
         转换股票代码格式: 000001.SH -> sh.000001
+        注意：Baostock 要求交易所代码必须小写
 
         Args:
             stock_code: 原始股票代码，格式 000001.SH
@@ -351,7 +357,7 @@ class StockDailyFetcher:
             return stock_code
 
         code, exchange = stock_code.split('.')
-        return f"{exchange}.{code}"
+        return f"{exchange.lower()}.{code}"
 
     async def _get_all_stock_codes(self) -> List[str]:
         """
@@ -380,7 +386,7 @@ class StockDailyFetcher:
             logger.error(f"获取股票代码列表失败: {str(e)}")
             return []
 
-    def _process_single_stock(self, stock: Dict, idx: int, total_stocks: int, today: str) -> bool:
+    def _process_single_stock(self, stock: Dict, idx: int, total_stocks: int, today: str):
         """
         处理单个股票的日线数据同步（同步方法，用于线程池执行）
         每个线程独立登录 Baostock，避免线程安全问题
@@ -392,7 +398,9 @@ class StockDailyFetcher:
             today: 今天日期字符串
 
         Returns:
-            是否处理成功
+            "skip": 跳过（北交所股票）
+            True: 处理成功
+            False: 处理失败
         """
         stock_code = stock.get("stockCode")
         list_date = stock.get("listingDate")
@@ -401,6 +409,11 @@ class StockDailyFetcher:
         if not stock_code or not list_date:
             logger.warning(f"[{idx}/{total_stocks}] 股票信息不完整，跳过")
             return False
+
+        # 检查是否为北交所股票（Baostock 不支持北交所）
+        if stock_code.endswith(".BJ"):
+            logger.debug(f"[{idx}/{total_stocks}] 跳过北交所股票: {stock_code} {stock_name}")
+            return "skip"
 
         # 注意: 由于使用了多线程，日志输出可能会交错显示
         # 这里简化日志输出，避免日志混乱
