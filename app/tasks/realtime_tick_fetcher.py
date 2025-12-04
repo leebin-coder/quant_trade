@@ -607,7 +607,7 @@ class RealtimeTickFetcher:
                     # 检查当前时间是否在交易时段内
                     now_time = datetime.now().time()
                     in_morning = time(9, 0) <= now_time <= time(11, 30)
-                    in_afternoon = time(13, 0) <= now_time <= time(15, 30)
+                    in_afternoon = time(13, 0) <= now_time <= time(19, 30)
 
                     # 如果不在交易时段，暂停执行
                     if not (in_morning or in_afternoon):
