@@ -620,7 +620,7 @@ class RealtimeTickFetcher:
                             logger.info(f"当前时间 {now_time} 为午休时间，暂停执行，等待至13:00...")
                             await asyncio.sleep(60)  # 等待1分钟后重新检查
                             continue
-                        elif now_time > time(15, 30):
+                        elif now_time > time(19, 30):
                             logger.info(f"当前时间 {now_time} 已过收盘时间，任务结束")
                             break  # 结束任务
                         else:
