@@ -54,7 +54,7 @@ class Settings(BaseSettings):
     stock_daily_max_workers: int = Field(1, env="STOCK_DAILY_MAX_WORKERS")  # 日线数据同步最大并发线程数（建议1，Baostock极度不稳定）
 
     # ClickHouse 配置
-    clickhouse_host: str = Field("localhost", env="CLICKHOUSE_HOST")
+    clickhouse_host: str = Field("clickhouse-m4", env="CLICKHOUSE_HOST")
     clickhouse_port: int = Field(9000, env="CLICKHOUSE_PORT")
     clickhouse_user: str = Field("libin", env="CLICKHOUSE_USER")
     clickhouse_password: str = Field("libin122351", env="CLICKHOUSE_PASSWORD")
