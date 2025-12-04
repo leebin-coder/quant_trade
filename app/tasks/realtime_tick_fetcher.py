@@ -567,7 +567,7 @@ class RealtimeTickFetcher:
         morning_start = time(9, 0)      # 上午9:00
         morning_end = time(11, 30)      # 上午11:30
         afternoon_start = time(13, 0)   # 下午13:00
-        afternoon_end = time(15, 30)    # 下午15:30
+        afternoon_end = time(19, 30)    # 下午15:30
 
         in_morning_session = morning_start <= current_time <= morning_end
         in_afternoon_session = afternoon_start <= current_time <= afternoon_end
