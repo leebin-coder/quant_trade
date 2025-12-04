@@ -15,8 +15,14 @@ sys.path.insert(0, str(project_root))
 from app.tasks.stock_data_fetcher import StockDataFetcher
 from app.tasks.trading_calendar_fetcher import TradingCalendarFetcher
 from app.tasks.stock_daily_fetcher import StockDailyFetcher
-from app.tasks.realtime_tick_fetcher import RealtimeTickFetcher
 from app.utils.logger import logger
+
+try:
+    from app.tasks.realtime_tick_fetcher import RealtimeTickFetcher
+    tick_fetcher_import_error = None
+except ModuleNotFoundError as exc:
+    RealtimeTickFetcher = None
+    tick_fetcher_import_error = exc
 
 
 class TaskRunner:
@@ -26,7 +32,7 @@ class TaskRunner:
         self.stock_fetcher = StockDataFetcher()
         self.calendar_fetcher = TradingCalendarFetcher()
         self.daily_fetcher = StockDailyFetcher()
-        self.tick_fetcher = RealtimeTickFetcher()
+        self.tick_fetcher = RealtimeTickFetcher() if RealtimeTickFetcher else None
 
     async def run_stock_sync(self):
         """
@@ -110,6 +116,13 @@ class TaskRunner:
         获取所有股票（除北交所）的实时数据
         按50只分组，每组一个线程，每隔3秒请求一次
         """
+        if not self.tick_fetcher:
+            logger.error("实时Tick数据同步任务不可用：缺少 ClickHouse 依赖或相关模块未安装。")
+            if tick_fetcher_import_error:
+                logger.error(f"导入错误: {tick_fetcher_import_error}")
+            logger.error("请执行 `pip install clickhouse-driver` 后重试。")
+            return False
+
         logger.info("=" * 80)
         logger.info("手动执行：实时Tick数据同步任务（完整版）")
         logger.info(f"开始时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -154,6 +167,8 @@ def print_menu():
     print("   - 获取所有股票（除北交所）的实时数据")
     print("   - 按50只分组，每组一个线程，每隔3秒请求一次")
     print("   - 持续运行，按Ctrl+C停止")
+    if RealtimeTickFetcher is None:
+        print("   - ⚠️ 当前缺少 ClickHouse 依赖，功能暂不可用")
     print()
     print("0. 退出")
     print("=" * 60)
@@ -227,6 +242,12 @@ async def main():
             else:
                 logger.info("取消执行")
         elif choice == "5":
+            if not runner.tick_fetcher:
+                logger.error("实时Tick数据同步任务不可用：缺少 ClickHouse 依赖或相关模块未安装。")
+                if tick_fetcher_import_error:
+                    logger.error(f"导入错误: {tick_fetcher_import_error}")
+                logger.error("请执行 `pip install clickhouse-driver` 后重试。")
+                continue
             confirm = input("\n确认执行实时Tick数据同步任务（完整版）？(y/n): ").strip().lower()
             if confirm == "y":
                 start_time = datetime.now()
