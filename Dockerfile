@@ -1,4 +1,5 @@
-
+# 使用南京大学镜像源（国内可访问）
+FROM docker.nju.edu.cn/library/python:3.11-slim
 
 # 设置工作目录
 WORKDIR /app
