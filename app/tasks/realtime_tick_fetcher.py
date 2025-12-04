@@ -3,13 +3,16 @@
 每天9:00-15:30运行，获取实时行情数据
 """
 import asyncio
-from datetime import datetime, time
-from typing import Dict, List, Optional
+import json
+import threading
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, time, date
+from typing import Dict, List, Optional, Tuple
 import time as time_module
 
-import tushare as ts
 import httpx
+import tushare as ts
+from clickhouse_driver import Client
 
 from app.core.config import settings
 from app.utils.logger import logger
@@ -34,6 +37,21 @@ class RealtimeTickFetcher:
         self.batch_size = 50  # sina数据源一次最多获取50只股票
         self.max_workers = 5  # 线程池大小，每个线程处理50只股票
         self.fetch_interval = 3  # 每次获取间隔（秒）
+        self.clickhouse_table = "market_realtime_ticks"
+        self._clickhouse_local = threading.local()
+        self.source_name = "tushare_realtime_quote"
+        self.clickhouse_columns = [
+            "ts_code", "name",
+            "trade", "price", "open", "high", "low", "pre_close",
+            "bid", "ask", "volume", "amount",
+            "b1_v", "b1_p", "b2_v", "b2_p", "b3_v", "b3_p", "b4_v", "b4_p", "b5_v", "b5_p",
+            "a1_v", "a1_p", "a2_v", "a2_p", "a3_v", "a3_p", "a4_v", "a4_p", "a5_v", "a5_p",
+            "date", "time", "source", "raw_json"
+        ]
+        self.clickhouse_insert_settings = {
+            "async_insert": 1,
+            "wait_for_async_insert": 0
+        }
 
     async def get_all_stocks_except_bse(self) -> List[str]:
         """
@@ -80,6 +98,224 @@ class RealtimeTickFetcher:
         except Exception as e:
             logger.error(f"获取股票列表异常: {e}", exc_info=True)
             return []
+
+    def _get_clickhouse_client(self) -> Client:
+        """获取线程独立的 ClickHouse 客户端"""
+        if not hasattr(self._clickhouse_local, "client"):
+            self._clickhouse_local.client = Client(
+                host=settings.clickhouse_host,
+                port=settings.clickhouse_port,
+                user=settings.clickhouse_user,
+                password=settings.clickhouse_password,
+                database=settings.clickhouse_database,
+                settings={"strings_as_bytes": False},
+            )
+        return self._clickhouse_local.client
+
+    @staticmethod
+    def _extract_first_value(data: Dict, keys: List[str]):
+        """从数据字典中按顺序提取第一个有效字段"""
+        for key in keys:
+            if key in data:
+                value = data.get(key)
+                if value not in (None, "", "--", "-"):
+                    return value
+        return None
+
+    @staticmethod
+    def _normalize_string(value) -> Optional[str]:
+        """处理字符串字段"""
+        if value in (None, "", "--", "-"):
+            return None
+        result = str(value).strip()
+        return result or None
+
+    @staticmethod
+    def _parse_float(value) -> Optional[float]:
+        """安全地将数据转换为浮点数"""
+        if value in (None, "", "--", "-"):
+            return None
+        try:
+            if isinstance(value, str):
+                cleaned = value.replace(",", "").strip()
+                if cleaned == "":
+                    return None
+                return float(cleaned)
+            return float(value)
+        except (ValueError, TypeError):
+            return None
+
+    @staticmethod
+    def _parse_trade_datetime(date_str: Optional[str], time_str: Optional[str]) -> Tuple[date, datetime]:
+        """解析交易日期和时间"""
+        fallback = datetime.now()
+
+        parsed_date = None
+        if date_str:
+            cleaned = date_str.strip().replace("/", "-")
+            if len(cleaned) == 8 and cleaned.isdigit():
+                cleaned = f"{cleaned[:4]}-{cleaned[4:6]}-{cleaned[6:]}"
+            for fmt in ("%Y-%m-%d", "%Y/%m/%d"):
+                try:
+                    parsed_date = datetime.strptime(cleaned, fmt).date()
+                    break
+                except ValueError:
+                    continue
+        if parsed_date is None:
+            parsed_date = fallback.date()
+
+        parsed_time = None
+        if time_str:
+            cleaned_time = time_str.strip().replace(".", ":")
+            for fmt in ("%H:%M:%S", "%H%M%S"):
+                try:
+                    parsed_time = datetime.strptime(cleaned_time, fmt).time()
+                    break
+                except ValueError:
+                    continue
+
+        if parsed_time is None:
+            parsed_time = fallback.time()
+
+        combined = datetime.combine(parsed_date, parsed_time)
+        return parsed_date, combined
+
+    def _build_tick_row(self, tick_data: Dict) -> Optional[Tuple]:
+        """将 tick 字典转换为 ClickHouse 行，字段名与 Tushare 文档保持一致"""
+        field_aliases = {
+            "ts_code": ["ts_code", "TS_CODE"],
+            "name": ["name", "NAME", "sec_name", "SECNAME"],
+            "trade": ["trade", "TRADE"],
+            "price": ["price", "PRICE"],
+            "open": ["open", "OPEN"],
+            "high": ["high", "HIGH"],
+            "low": ["low", "LOW"],
+            "pre_close": ["pre_close", "PRE_CLOSE", "preclose"],
+            "bid": ["bid", "BID", "b1_p", "B1_P"],
+            "ask": ["ask", "ASK", "a1_p", "A1_P"],
+            "volume": ["volume", "VOLUME", "vol", "VOL"],
+            "amount": ["amount", "AMOUNT", "turnover", "TURNOVER"],
+            "b1_v": ["b1_v", "B1_V"],
+            "b1_p": ["b1_p", "B1_P"],
+            "b2_v": ["b2_v", "B2_V"],
+            "b2_p": ["b2_p", "B2_P"],
+            "b3_v": ["b3_v", "B3_V"],
+            "b3_p": ["b3_p", "B3_P"],
+            "b4_v": ["b4_v", "B4_V"],
+            "b4_p": ["b4_p", "B4_P"],
+            "b5_v": ["b5_v", "B5_V"],
+            "b5_p": ["b5_p", "B5_P"],
+            "a1_v": ["a1_v", "A1_V"],
+            "a1_p": ["a1_p", "A1_P"],
+            "a2_v": ["a2_v", "A2_V"],
+            "a2_p": ["a2_p", "A2_P"],
+            "a3_v": ["a3_v", "A3_V"],
+            "a3_p": ["a3_p", "A3_P"],
+            "a4_v": ["a4_v", "A4_V"],
+            "a4_p": ["a4_p", "A4_P"],
+            "a5_v": ["a5_v", "A5_V"],
+            "a5_p": ["a5_p", "A5_P"],
+            "date": ["date", "DATE"],
+            "time": ["time", "TIME"],
+        }
+
+        ts_code = self._normalize_string(
+            self._extract_first_value(tick_data, field_aliases["ts_code"])
+        )
+        if not ts_code:
+            logger.debug("跳过一条缺少股票代码的tick数据")
+            return None
+
+        str_fields = {}
+        str_fields["name"] = self._normalize_string(
+            self._extract_first_value(tick_data, field_aliases["name"])
+        )
+
+        float_fields = {}
+        numeric_keys = [
+            "trade", "price", "open", "high", "low", "pre_close",
+            "bid", "ask", "volume", "amount",
+            "b1_v", "b1_p", "b2_v", "b2_p", "b3_v", "b3_p", "b4_v", "b4_p", "b5_v", "b5_p",
+            "a1_v", "a1_p", "a2_v", "a2_p", "a3_v", "a3_p", "a4_v", "a4_p", "a5_v", "a5_p",
+        ]
+        for key in numeric_keys:
+            float_fields[key] = self._parse_float(
+                self._extract_first_value(tick_data, field_aliases.get(key, []))
+            )
+
+        date_raw = self._extract_first_value(tick_data, field_aliases["date"])
+        time_raw = self._extract_first_value(tick_data, field_aliases["time"])
+        trade_date, trade_datetime = self._parse_trade_datetime(
+            date_raw, time_raw
+        )
+
+        row = (
+            ts_code,
+            str_fields.get("name") or ts_code,
+            float_fields["trade"],
+            float_fields["price"],
+            float_fields["open"],
+            float_fields["high"],
+            float_fields["low"],
+            float_fields["pre_close"],
+            float_fields["bid"],
+            float_fields["ask"],
+            float_fields["volume"],
+            float_fields["amount"],
+            float_fields["b1_v"],
+            float_fields["b1_p"],
+            float_fields["b2_v"],
+            float_fields["b2_p"],
+            float_fields["b3_v"],
+            float_fields["b3_p"],
+            float_fields["b4_v"],
+            float_fields["b4_p"],
+            float_fields["b5_v"],
+            float_fields["b5_p"],
+            float_fields["a1_v"],
+            float_fields["a1_p"],
+            float_fields["a2_v"],
+            float_fields["a2_p"],
+            float_fields["a3_v"],
+            float_fields["a3_p"],
+            float_fields["a4_v"],
+            float_fields["a4_p"],
+            float_fields["a5_v"],
+            float_fields["a5_p"],
+            trade_date,
+            trade_datetime,
+            self.source_name,
+            json.dumps(tick_data, ensure_ascii=False),
+        )
+        return row
+
+    def save_tick_data_to_clickhouse(self, tick_data_list: List[Dict]):
+        """将tick数据批量写入ClickHouse"""
+        if not tick_data_list:
+            return
+
+        rows = []
+        for tick_data in tick_data_list:
+            row = self._build_tick_row(tick_data)
+            if row:
+                rows.append(row)
+
+        if not rows:
+            return
+
+        try:
+            client = self._get_clickhouse_client()
+            columns_sql = ", ".join(self.clickhouse_columns)
+            client.execute(
+                f"INSERT INTO {self.clickhouse_table} ({columns_sql}) VALUES",
+                rows,
+                settings=self.clickhouse_insert_settings,
+            )
+            logger.debug(
+                f"写入 {len(rows)} 条实时tick数据到 ClickHouse 表 {self.clickhouse_table}"
+            )
+        except Exception as e:
+            logger.error(f"写入ClickHouse失败: {e}", exc_info=True)
 
     def fetch_realtime_tick_batch(self, stock_codes: List[str]) -> Optional[List[Dict]]:
         """
@@ -210,8 +446,8 @@ class RealtimeTickFetcher:
                     fields_str = " | ".join([f"{k}:{v}" for k, v in sorted(first_tick.items())])
                     print(f"[批次{batch_id:>3}] 第{round_num:>3}次 ({len(tick_data_list)}只) | {fields_str}")
 
-                # TODO: 这里调用入库接口
-                # await self.save_tick_data_to_db(tick_data_list)
+                # 将数据写入 ClickHouse
+                self.save_tick_data_to_clickhouse(tick_data_list)
 
         except Exception as e:
             logger.error(f"[批次{batch_id}] 第{round_num}次 - 获取数据失败: {e}")
@@ -256,8 +492,8 @@ class RealtimeTickFetcher:
                     # 打印表格样式（一行显示批次、次数和所有股票的时间|代码）
                     print(f"[批次{batch_id:>3}] 第{request_count:>3}次 | {' '.join(times_and_codes)}")
 
-                    # TODO: 这里调用入库接口
-                    # await self.save_tick_data_to_db(tick_data_list)
+                    # 将数据写入 ClickHouse
+                    self.save_tick_data_to_clickhouse(tick_data_list)
 
             except Exception as e:
                 logger.error(f"[批次{batch_id}] 第{request_count}次 {current_time} - 获取数据失败: {e}")

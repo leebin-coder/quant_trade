@@ -53,6 +53,13 @@ class Settings(BaseSettings):
     stock_daily_schedule_day_of_week: str = Field("*", env="STOCK_DAILY_SCHEDULE_DAY_OF_WEEK")  # 每天
     stock_daily_max_workers: int = Field(1, env="STOCK_DAILY_MAX_WORKERS")  # 日线数据同步最大并发线程数（建议1，Baostock极度不稳定）
 
+    # ClickHouse 配置
+    clickhouse_host: str = Field("localhost", env="CLICKHOUSE_HOST")
+    clickhouse_port: int = Field(9000, env="CLICKHOUSE_PORT")
+    clickhouse_user: str = Field("libin", env="CLICKHOUSE_USER")
+    clickhouse_password: str = Field("libin122351", env="CLICKHOUSE_PASSWORD")
+    clickhouse_database: str = Field("quant_trade", env="CLICKHOUSE_DATABASE")
+
     # 日志配置
     log_level: str = Field("INFO", env="LOG_LEVEL")
 

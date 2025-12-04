@@ -104,25 +104,6 @@ class TaskRunner:
 
         return True
 
-    async def run_realtime_tick_test(self):
-        """
-        运行实时Tick数据测试任务
-        仅获取601398.SH的实时数据并打印到控制台
-        """
-        logger.info("=" * 80)
-        logger.info("手动执行：实时Tick数据测试任务")
-        logger.info(f"开始时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        logger.info("=" * 80)
-
-        try:
-            await self.tick_fetcher.fetch_realtime_tick_test()
-            logger.info("\n✅ 实时Tick数据测试任务执行成功！")
-        except Exception as e:
-            logger.error(f"\n❌ 实时Tick数据测试任务执行失败: {e}", exc_info=True)
-            return False
-
-        return True
-
     async def run_realtime_tick_sync(self):
         """
         运行实时Tick数据同步任务（完整版）
@@ -169,11 +150,7 @@ def print_menu():
     print("   - 遍历所有股票，获取3种复权类型数据")
     print("   - 批量插入数据库（1000条/批）")
     print()
-    print("5. 执行实时Tick数据测试任务")
-    print("   - 仅获取601398.SH的实时tick数据")
-    print("   - 每隔1秒请求一次，打印到控制台")
-    print()
-    print("6. 执行实时Tick数据同步任务（完整版）")
+    print("5. 执行实时Tick数据同步任务（完整版）")
     print("   - 获取所有股票（除北交所）的实时数据")
     print("   - 按50只分组，每组一个线程，每隔3秒请求一次")
     print("   - 持续运行，按Ctrl+C停止")
@@ -188,7 +165,7 @@ async def main():
 
     while True:
         print_menu()
-        choice = input("请选择要执行的任务 (0-6): ").strip()
+        choice = input("请选择要执行的任务 (0-5): ").strip()
 
         if choice == "0":
             logger.info("退出任务运行器")
@@ -250,20 +227,6 @@ async def main():
             else:
                 logger.info("取消执行")
         elif choice == "5":
-            confirm = input("\n确认执行实时Tick数据测试任务？(y/n): ").strip().lower()
-            if confirm == "y":
-                start_time = datetime.now()
-                success = await runner.run_realtime_tick_test()
-                end_time = datetime.now()
-                duration = (end_time - start_time).total_seconds()
-
-                if success:
-                    logger.info(f"\n⏱️  任务执行耗时: {duration:.2f} 秒")
-                else:
-                    logger.error(f"\n⏱️  任务执行失败，耗时: {duration:.2f} 秒")
-            else:
-                logger.info("取消执行")
-        elif choice == "6":
             confirm = input("\n确认执行实时Tick数据同步任务（完整版）？(y/n): ").strip().lower()
             if confirm == "y":
                 start_time = datetime.now()

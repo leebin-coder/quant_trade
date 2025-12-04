@@ -32,6 +32,9 @@ dependencies = [
     # HTTP Client
     "httpx>=0.25.0",
 
+    # Databases
+    "clickhouse-driver>=0.2.6",
+
     # Logging
     "loguru>=0.7.0",
 
