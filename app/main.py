@@ -14,6 +14,7 @@ from app.core.config import settings
 from app.tasks.stock_data_fetcher import StockDataFetcher
 from app.tasks.trading_calendar_fetcher import TradingCalendarFetcher
 from app.tasks.stock_daily_fetcher import StockDailyFetcher
+from app.tasks.realtime_tick_fetcher import RealtimeTickFetcher
 
 
 class TradingService:
@@ -25,6 +26,8 @@ class TradingService:
         self.stock_fetcher = StockDataFetcher()
         self.calendar_fetcher = TradingCalendarFetcher()
         self.daily_fetcher = StockDailyFetcher()
+        self.realtime_tick_fetcher = RealtimeTickFetcher()
+        self._tick_task_running = False
         # APScheduler 使用系统时区（容器时区）
         self.scheduler = AsyncIOScheduler()
         logger.info(f"初始化 {settings.project_name} v{settings.version}")
@@ -179,6 +182,21 @@ class TradingService:
         except Exception as e:
             logger.error(f"股票日线数据获取出错: {e}", exc_info=True)
 
+    async def _realtime_tick_sync_task(self):
+        """实时Tick数据同步任务 - 由调度器触发"""
+        if self._tick_task_running:
+            logger.warning("实时Tick任务仍在运行，本次调度跳过")
+            return
+
+        logger.info("触发实时Tick数据同步任务...")
+        self._tick_task_running = True
+        try:
+            await self.realtime_tick_fetcher.start_realtime_tick_sync()
+        except Exception as e:
+            logger.error(f"实时Tick数据获取出错: {e}", exc_info=True)
+        finally:
+            self._tick_task_running = False
+
     async def _stock_data_fetch_loop(self):
         """股票数据获取调度器 - 每天凌晨0:00执行"""
         logger.info("📊 股票数据获取任务调度器已启动")
@@ -210,6 +228,13 @@ class TradingService:
             day_of_week=settings.stock_daily_schedule_day_of_week,
             hour=settings.stock_daily_schedule_hour,
             minute=settings.stock_daily_schedule_minute
+        )
+
+        # 配置实时Tick数据调度：默认每个交易日9:00启动
+        realtime_tick_trigger = CronTrigger(
+            day_of_week=settings.realtime_tick_schedule_day_of_week,
+            hour=settings.realtime_tick_schedule_hour,
+            minute=settings.realtime_tick_schedule_minute
         )
 
         # 添加股票数据获取调度任务
@@ -257,6 +282,21 @@ class TradingService:
         logger.info("📈 股票日线数据获取任务调度器已启动")
         logger.info(f"⏰ 调度时间: 每天 {settings.stock_daily_schedule_hour:02d}:{settings.stock_daily_schedule_minute:02d}")
         logger.info("✓ 股票日线数据获取调度任务已添加")
+
+        # 添加实时Tick数据同步调度任务
+        self.scheduler.add_job(
+            self._realtime_tick_sync_task,
+            trigger=realtime_tick_trigger,
+            id="realtime_tick_sync",
+            name="实时Tick数据同步任务",
+            replace_existing=True
+        )
+        logger.info("⏱️ 实时Tick数据同步调度器已启动")
+        logger.info(
+            f"⏰ 调度时间: 每周 {settings.realtime_tick_schedule_day_of_week} "
+            f"{settings.realtime_tick_schedule_hour:02d}:{settings.realtime_tick_schedule_minute:02d}"
+        )
+        logger.info("✓ 实时Tick数据同步调度任务已添加")
 
         # 启动调度器
         if not self.scheduler.running:

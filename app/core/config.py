@@ -48,10 +48,15 @@ class Settings(BaseSettings):
     trading_calendar_schedule_day_of_week: str = Field("*", env="TRADING_CALENDAR_SCHEDULE_DAY_OF_WEEK")  # 每天
 
     # 股票日线数据获取调度配置（每天下午4:00执行）
-    stock_daily_schedule_hour: int = Field(15, env="STOCK_DAILY_SCHEDULE_HOUR")  # 小时（24小时制）
+    stock_daily_schedule_hour: int = Field(17, env="STOCK_DAILY_SCHEDULE_HOUR")  # 小时（24小时制）
     stock_daily_schedule_minute: int = Field(30, env="STOCK_DAILY_SCHEDULE_MINUTE")  # 分钟
     stock_daily_schedule_day_of_week: str = Field("*", env="STOCK_DAILY_SCHEDULE_DAY_OF_WEEK")  # 每天
     stock_daily_max_workers: int = Field(1, env="STOCK_DAILY_MAX_WORKERS")  # 日线数据同步最大并发线程数（建议1，Baostock极度不稳定）
+
+    # 实时Tick数据获取调度配置（每天9:00启动）
+    realtime_tick_schedule_hour: int = Field(9, env="REALTIME_TICK_SCHEDULE_HOUR")  # 小时（24小时制）
+    realtime_tick_schedule_minute: int = Field(15, env="REALTIME_TICK_SCHEDULE_MINUTE")  # 分钟
+    realtime_tick_schedule_day_of_week: str = Field("mon-fri", env="REALTIME_TICK_SCHEDULE_DAY_OF_WEEK")  # 默认交易日
 
     # ClickHouse 配置
     clickhouse_host: str = Field("clickhouse-m4", env="CLICKHOUSE_HOST")

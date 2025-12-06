@@ -1,6 +1,6 @@
 """
 实时Tick数据获取任务
-每天9:00-15:30运行，获取实时行情数据
+在交易日的 9:15-9:25、9:30-11:30、13:00-15:00 运行，获取实时行情数据
 """
 import asyncio
 import json
@@ -40,6 +40,11 @@ class RealtimeTickFetcher:
         self.clickhouse_table = "market_realtime_ticks"
         self._clickhouse_local = threading.local()
         self.source_name = "tushare_realtime_quote"
+        self.trading_windows = [
+            (time(9, 15), time(9, 25)),
+            (time(9, 30), time(11, 30)),
+            (time(13, 0), time(15, 0)),
+        ]
         self.clickhouse_columns = [
             "ts_code", "name",
             "trade", "price", "open", "high", "low", "pre_close",
@@ -179,6 +184,24 @@ class RealtimeTickFetcher:
 
         combined = datetime.combine(parsed_date, parsed_time)
         return parsed_date, combined
+    def _get_trading_window_status(self, current_time: time) -> Tuple[str, Optional[time]]:
+        """
+        判断当前时间所处的实时tick采集窗口状态
+
+        Returns:
+            Tuple[str, Optional[time]]:
+                - status: "active" 当前在采集窗口内；"upcoming" 尚未开始；"finished" 今日全部结束
+                - reference_time: 当 status 为 "upcoming" 时表示下一窗口开始时间
+        """
+        for start, end in self.trading_windows:
+            if start <= current_time <= end:
+                return "active", end
+
+        for start, _ in self.trading_windows:
+            if current_time < start:
+                return "upcoming", start
+
+        return "finished", None
 
     def _build_tick_row(self, tick_data: Dict) -> Optional[Tuple]:
         """将 tick 字典转换为 ClickHouse 行，字段名与 Tushare 文档保持一致"""
@@ -347,7 +370,7 @@ class RealtimeTickFetcher:
                 tick_data = row.to_dict()
                 tick_data_list.append(tick_data)
 
-            logger.info(f"成功获取 {len(tick_data_list)} 条实时数据")
+            logger.debug(f"成功获取 {len(tick_data_list)} 条实时数据")
             return tick_data_list
 
         except Exception as e:
@@ -441,10 +464,9 @@ class RealtimeTickFetcher:
 
                 # 只打印第一条数据的完整字段
                 if tick_data_list:
-                    first_tick = tick_data_list[0]
-                    # 将所有字段格式化为字符串
-                    fields_str = " | ".join([f"{k}:{v}" for k, v in sorted(first_tick.items())])
-                    print(f"[批次{batch_id:>3}] 第{round_num:>3}次 ({len(tick_data_list)}只) | {fields_str}")
+                    logger.debug(
+                        f"[批次{batch_id:>3}] 第{round_num:>3}次获取 {len(tick_data_list)} 条实时数据"
+                    )
 
                 # 将数据写入 ClickHouse
                 self.save_tick_data_to_clickhouse(tick_data_list)
@@ -482,15 +504,9 @@ class RealtimeTickFetcher:
                         tick_data = row.to_dict()
                         tick_data_list.append(tick_data)
 
-                    # 提取时间和股票代码
-                    times_and_codes = []
-                    for tick_data in tick_data_list:
-                        ts_code = tick_data.get('TS_CODE', 'N/A')
-                        tick_time = tick_data.get('TIME', 'N/A')
-                        times_and_codes.append(f"{tick_time}|{ts_code}")
-
-                    # 打印表格样式（一行显示批次、次数和所有股票的时间|代码）
-                    print(f"[批次{batch_id:>3}] 第{request_count:>3}次 | {' '.join(times_and_codes)}")
+                    logger.debug(
+                        f"[批次{batch_id:>3}] 第{request_count:>3}次获取 {len(tick_data_list)} 条实时数据"
+                    )
 
                     # 将数据写入 ClickHouse
                     self.save_tick_data_to_clickhouse(tick_data_list)
@@ -546,7 +562,7 @@ class RealtimeTickFetcher:
         """
         启动实时tick数据同步任务
         前提条件：今天是交易日
-        运行时间：9:00-15:30
+        运行时间：9:15-9:25、9:30-11:30、13:00-15:00
         按50只股票分组，所有批次同时发起请求，严格3秒一轮
         """
         logger.info("=" * 80)
@@ -562,19 +578,8 @@ class RealtimeTickFetcher:
             logger.warning(f"今天 {today} 不是交易日，任务不执行")
             return
 
-        # 2. 检查当前时间是否在交易时间内
-        current_time = datetime.now().time()
-        morning_start = time(9, 0)      # 上午9:00
-        morning_end = time(11, 30)      # 上午11:30
-        afternoon_start = time(13, 0)   # 下午13:00
-        afternoon_end = time(19, 30)    # 下午15:30
-
-        in_morning_session = morning_start <= current_time <= morning_end
-        in_afternoon_session = afternoon_start <= current_time <= afternoon_end
-
-        if not (in_morning_session or in_afternoon_session):
-            logger.warning(f"当前时间 {current_time} 不在交易时间内（9:00-11:30 或 13:00-15:30），任务不执行")
-            return
+        window_desc = "、".join([f"{start.strftime('%H:%M')}-{end.strftime('%H:%M')}" for start, end in self.trading_windows])
+        logger.info(f"实时Tick采集窗口: {window_desc}")
 
         try:
             # 3. 获取所有股票（除北交所）
@@ -604,34 +609,29 @@ class RealtimeTickFetcher:
 
             try:
                 while True:
-                    # 检查当前时间是否在交易时段内
                     now_time = datetime.now().time()
-                    in_morning = time(9, 0) <= now_time <= time(11, 30)
-                    in_afternoon = time(13, 0) <= now_time <= time(19, 30)
+                    window_status, reference_time = self._get_trading_window_status(now_time)
 
-                    # 如果不在交易时段，暂停执行
-                    if not (in_morning or in_afternoon):
-                        # 判断当前处于什么阶段
-                        if now_time < time(9, 0):
-                            logger.info(f"当前时间 {now_time} 未到开盘时间，等待至9:00...")
-                            await asyncio.sleep(60)  # 等待1分钟后重新检查
+                    if window_status != "active":
+                        if window_status == "upcoming" and reference_time:
+                            logger.info(
+                                f"当前时间 {now_time} 不在实时采集窗口，将在 {reference_time.strftime('%H:%M:%S')} 再次开始..."
+                            )
+                            wait_seconds = (
+                                datetime.combine(datetime.now().date(), reference_time)
+                                - datetime.combine(datetime.now().date(), now_time)
+                            ).total_seconds()
+                            await asyncio.sleep(min(max(wait_seconds, 10), 60))
                             continue
-                        elif time(11, 30) < now_time < time(13, 0):
-                            logger.info(f"当前时间 {now_time} 为午休时间，暂停执行，等待至13:00...")
-                            await asyncio.sleep(60)  # 等待1分钟后重新检查
-                            continue
-                        elif now_time > time(19, 30):
-                            logger.info(f"当前时间 {now_time} 已过收盘时间，任务结束")
-                            break  # 结束任务
                         else:
-                            await asyncio.sleep(10)  # 其他情况等待10秒
-                            continue
+                            logger.info(f"当前时间 {now_time} 已过今日实时采集时间，任务结束")
+                            break  # 结束任务
 
                     request_count += 1
                     round_start_time = time_module.time()
                     current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-                    logger.info(f"\n[第{request_count}轮请求] {current_time}")
+                    logger.debug(f"[第{request_count}轮请求] {current_time}")
 
                     # 所有批次同时发起请求（不等待结果）
                     futures = []
