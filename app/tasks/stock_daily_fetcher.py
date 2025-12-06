@@ -67,6 +67,14 @@ class StockDailyFetcher:
         logger.info(f"并发线程数: {self.max_workers}")
         logger.info("=" * 80)
 
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        # 检查是否为交易日
+        is_trading_day = await self._is_trading_day(today)
+        if not is_trading_day:
+            logger.warning(f"今天 {today} 不是交易日，日线同步任务直接结束")
+            return
+
         try:
             # Step 1: 获取所有股票基本信息
             logger.info("\n📊 步骤1: 获取所有股票基本信息...")
@@ -77,7 +85,6 @@ class StockDailyFetcher:
 
             logger.info(f"✓ 共获取 {len(stocks)} 只股票")
 
-            today = datetime.now().strftime("%Y-%m-%d")
             total_stocks = len(stocks)
 
             # 重置计数器
@@ -232,6 +239,33 @@ class StockDailyFetcher:
         except Exception as e:
             logger.error(f"获取{year}年交易日历失败: {str(e)}")
             return []
+
+    async def _is_trading_day(self, date_str: str) -> bool:
+        """
+        判断指定日期是否为交易日
+
+        Args:
+            date_str: 日期字符串 YYYY-MM-DD
+        """
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(
+                    f"{self.api_base_url}/trading-calendar/is-trading-day",
+                    headers=self.headers,
+                    params={"date": date_str}
+                )
+                response.raise_for_status()
+
+                result = response.json()
+                if result.get("code") == 200:
+                    data = result.get("data", {})
+                    return bool(data.get("isTradingDay"))
+                else:
+                    logger.error(f"检查交易日失败: {result.get('message')}")
+                    return False
+        except Exception as e:
+            logger.error(f"检查交易日异常: {str(e)}")
+            return False
 
     async def _get_trade_calendar_from_1990(self) -> List[str]:
         """
