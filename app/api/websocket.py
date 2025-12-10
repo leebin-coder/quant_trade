@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, time
+from datetime import date, datetime, time
 from typing import Any, Dict, Iterable, List, Optional
 
 import httpx
@@ -196,9 +196,9 @@ def _query_ticks(
 def _row_to_tick(row: Iterable[Any]) -> Dict[str, Any]:
     tick = dict(zip(_TICK_FIELDS, row))
     tick_time = tick.get("time")
-    if isinstance(tick_time, datetime):
+    if isinstance(tick_time, (datetime, time)):
         tick["time"] = tick_time.strftime("%H:%M:%S")
     tick_date = tick.get("date")
-    if isinstance(tick_date, datetime):
+    if isinstance(tick_date, (datetime, date)):
         tick["date"] = tick_date.strftime("%Y-%m-%d")
     return tick
