@@ -5,10 +5,15 @@ import asyncio
 from datetime import date, datetime, time
 from zoneinfo import ZoneInfo
 from typing import Any, Dict, Iterable, List, Optional, Tuple
-
-import httpx
 from clickhouse_driver import Client
-from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, status
+from fastapi import (
+    APIRouter,
+    HTTPException,
+    Query,
+    WebSocket,
+    WebSocketDisconnect,
+    status,
+)
 
 from app.core.config import settings
 from app.utils.logger import logger
@@ -82,7 +87,9 @@ _ch_client = _get_clickhouse_client()
 
 @router.websocket("/ticks")
 async def websocket_ticks(
-    websocket: WebSocket, stock_code: str | None = Query(None, alias="stockCode")
+    websocket: WebSocket,
+    stock_code: str | None = Query(None, alias="stockCode"),
+    trade_date: str | None = Query(None, alias="date"),
 ):
     """Stream tick data updates for a given stock."""
     await websocket.accept()
@@ -96,13 +103,11 @@ async def websocket_ticks(
 
     logger.info(f"[WebSocket] Client connected for {stock_code}")
 
-    trade_date = await _fetch_latest_trading_day()
     if not trade_date:
-        logger.error("无法获取最新交易日，终止 WebSocket 会话")
-        await websocket.send_json(
-            {"status": "non_trading", "historyTicks": [], "latestTicks": []}
+        await websocket.close(
+            code=status.WS_1008_POLICY_VIOLATION,
+            reason="date is required",
         )
-        await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
         return
 
     history_ticks, last_time = _query_ticks(stock_code, trade_date, None)
@@ -150,26 +155,6 @@ def _determine_status(now: datetime) -> str:
         return "non_trading"
 
     return "rest"
-
-
-async def _fetch_latest_trading_day() -> Optional[str]:
-    url = f"http://{settings.stock_api_host}:{settings.stock_api_port}/api/trading-calendar/latest-on-or-before"
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {settings.stock_api_token}",
-    }
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(
-                url, headers=headers, params={"token": settings.stock_api_token}
-            )
-            response.raise_for_status()
-            data = response.json()
-            if data.get("code") == 200 and data.get("data"):
-                return data["data"].get("tradeDate")
-    except Exception as exc:
-        logger.error("Failed to fetch latest trading day: %s", exc, exc_info=True)
-    return None
 
 
 def _query_ticks(
