@@ -7,7 +7,7 @@ import json
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, time, date
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 import time as time_module
 
 import httpx
@@ -28,6 +28,7 @@ class RealtimeTickFetcher:
             "Content-Type": "application/json",
             "Authorization": f"Bearer {settings.stock_api_token}"
         }
+        self._auth_params = {"token": settings.stock_api_token}
         # 初始化 tushare pro
         self.tushare_token = "347ae3b92b9a97638f155512bc599767558b94c3dcb47f5abd058b95"
         ts.set_token(self.tushare_token)
@@ -58,6 +59,12 @@ class RealtimeTickFetcher:
             "wait_for_async_insert": 0
         }
 
+    def _with_token(self, extra_params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        params = dict(self._auth_params)
+        if extra_params:
+            params.update(extra_params)
+        return params
+
     async def get_all_stocks_except_bse(self) -> List[str]:
         """
         获取除北交所外的所有股票代码
@@ -71,7 +78,8 @@ class RealtimeTickFetcher:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.get(
                     f"{self.api_base_url}/stocks/all",
-                    headers=self.headers
+                    headers=self.headers,
+                    params=self._with_token()
                 )
                 response.raise_for_status()
 
@@ -540,7 +548,7 @@ class RealtimeTickFetcher:
                 response = await client.get(
                     f"{self.api_base_url}/trading-calendar/is-trading-day",
                     headers=self.headers,
-                    params={"date": date_str}
+                    params=self._with_token({"date": date_str})
                 )
                 response.raise_for_status()
 

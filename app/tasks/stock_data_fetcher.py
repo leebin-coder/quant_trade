@@ -4,7 +4,7 @@
 """
 import asyncio
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import tushare as ts
 import httpx
@@ -25,10 +25,17 @@ class StockDataFetcher:
             "Content-Type": "application/json",
             "Authorization": f"Bearer {settings.stock_api_token}"
         }
+        self._auth_params = {"token": settings.stock_api_token}
         # 初始化 tushare pro
         self.tushare_token = "347ae3b92b9a97638f155512bc599767558b94c3dcb47f5abd058b95"
         ts.set_token(self.tushare_token)
         self.pro = ts.pro_api()
+
+    def _with_token(self, extra_params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        params = dict(self._auth_params)
+        if extra_params:
+            params.update(extra_params)
+        return params
 
     async def fetch_all_stock_info(self):
         """
@@ -171,7 +178,8 @@ class StockDataFetcher:
                     response = await client.post(
                         f"{self.api_base_url}/stocks/batch",
                         json=batch,
-                        headers=self.headers
+                        headers=self.headers,
+                        params=self._with_token()
                     )
                     response.raise_for_status()
 
@@ -365,7 +373,8 @@ class StockDataFetcher:
                     response = await client.post(
                         f"{self.api_base_url}/stock-companies/batch-upsert",
                         json=batch,
-                        headers=self.headers
+                        headers=self.headers,
+                        params=self._with_token()
                     )
                     response.raise_for_status()
 

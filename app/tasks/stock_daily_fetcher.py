@@ -6,7 +6,7 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from threading import Lock
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 import time
 import random
 
@@ -30,6 +30,7 @@ class StockDailyFetcher:
             "Content-Type": "application/json",
             "Authorization": f"Bearer {settings.stock_api_token}"
         }
+        self._auth_params = {"token": settings.stock_api_token}
         # Baostock 登录状态
         self.bs_logged_in = False
 
@@ -49,6 +50,12 @@ class StockDailyFetcher:
         self.processed_count = 0  # 已处理数量
         self.count_lock = Lock()  # 线程安全的计数器锁
         self.login_lock = Lock()  # Baostock 登录锁，确保登录串行化
+
+    def _with_token(self, extra_params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        params = dict(self._auth_params)
+        if extra_params:
+            params.update(extra_params)
+        return params
 
     async def sync_stock_daily(self):
         """
@@ -186,7 +193,8 @@ class StockDailyFetcher:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.get(
                     f"{self.api_base_url}/stock-daily/latest-date",
-                    headers=self.headers
+                    headers=self.headers,
+                    params=self._with_token()
                 )
                 response.raise_for_status()
 
@@ -220,7 +228,8 @@ class StockDailyFetcher:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.get(
                     f"{self.api_base_url}/trading-calendar/year/{year}",
-                    headers=self.headers
+                    headers=self.headers,
+                    params=self._with_token()
                 )
                 response.raise_for_status()
 
@@ -252,7 +261,7 @@ class StockDailyFetcher:
                 response = await client.get(
                     f"{self.api_base_url}/trading-calendar/is-trading-day",
                     headers=self.headers,
-                    params={"date": date_str}
+                    params=self._with_token({"date": date_str})
                 )
                 response.raise_for_status()
 
@@ -301,7 +310,8 @@ class StockDailyFetcher:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.get(
                     url,
-                    headers=self.headers
+                    headers=self.headers,
+                    params=self._with_token()
                 )
 
                 logger.info(f"  响应状态码: {response.status_code}")
@@ -354,10 +364,10 @@ class StockDailyFetcher:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.get(
                     f"{self.api_base_url}/stock-daily/latest-date",
-                    params={
+                    params=self._with_token({
                         "stockCode": stock_code,
                         "adjustFlag": adjust_flag
-                    },
+                    }),
                     headers=self.headers
                 )
                 response.raise_for_status()
@@ -404,7 +414,8 @@ class StockDailyFetcher:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.get(
                     f"{self.api_base_url}/stock/codes",
-                    headers=self.headers
+                    headers=self.headers,
+                    params=self._with_token()
                 )
                 response.raise_for_status()
 
@@ -598,10 +609,10 @@ class StockDailyFetcher:
             with httpx.Client(timeout=30.0) as client:
                 response = client.get(
                     f"{self.api_base_url}/stock-daily/latest-date",
-                    params={
+                    params=self._with_token({
                         "stockCode": stock_code,
                         "adjustFlag": adjust_flag
-                    },
+                    }),
                     headers=self.headers
                 )
                 response.raise_for_status()
@@ -739,7 +750,8 @@ class StockDailyFetcher:
                         response = client.post(
                             f"{self.api_base_url}/stock-daily/batch",
                             json=batch,
-                            headers=self.headers
+                            headers=self.headers,
+                            params=self._with_token()
                         )
                         response.raise_for_status()
 
@@ -1010,7 +1022,8 @@ class StockDailyFetcher:
                         response = await client.post(
                             f"{self.api_base_url}/stock-daily/batch",
                             json=batch,
-                            headers=self.headers
+                            headers=self.headers,
+                            params=self._with_token()
                         )
                         response.raise_for_status()
 
@@ -1051,7 +1064,8 @@ class StockDailyFetcher:
                 response = await client.post(
                     f"{self.api_base_url}/stock-daily/batch",
                     json=daily_data,
-                    headers=self.headers
+                    headers=self.headers,
+                    params=self._with_token()
                 )
                 response.raise_for_status()
 

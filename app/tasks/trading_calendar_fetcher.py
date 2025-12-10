@@ -4,7 +4,7 @@
 """
 import asyncio
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import baostock as bs
 import httpx
@@ -26,6 +26,13 @@ class TradingCalendarFetcher:
             "Content-Type": "application/json",
             "Authorization": f"Bearer {settings.stock_api_token}"
         }
+        self._auth_params = {"token": settings.stock_api_token}
+
+    def _with_token(self, extra_params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        params = dict(self._auth_params)
+        if extra_params:
+            params.update(extra_params)
+        return params
 
     async def sync_trading_calendar(self):
         """
@@ -113,7 +120,8 @@ class TradingCalendarFetcher:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.get(
                     f"{self.api_base_url}/trading-calendar/latest",
-                    headers=self.headers
+                    headers=self.headers,
+                    params=self._with_token()
                 )
                 response.raise_for_status()
 
@@ -257,7 +265,8 @@ class TradingCalendarFetcher:
                     response = await client.post(
                         f"{self.api_base_url}/trading-calendar/batch",
                         json=batch,
-                        headers=self.headers
+                        headers=self.headers,
+                        params=self._with_token()
                     )
                     response.raise_for_status()
 
