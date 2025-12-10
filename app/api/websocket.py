@@ -117,14 +117,11 @@ async def websocket_ticks(
         while True:
             await asyncio.sleep(3)
             status_text = _determine_status(datetime.now())
-            if status_text != "trading":
-                continue
-
-            latest_ticks = _query_ticks(stock_code, trade_date, last_time)
-            if not latest_ticks:
-                continue
-
-            last_time = latest_ticks[-1]["time"]
+            latest_ticks: List[Dict[str, Any]] = []
+            if status_text == "trading":
+                latest_ticks = _query_ticks(stock_code, trade_date, last_time)
+                if latest_ticks:
+                    last_time = latest_ticks[-1]["time"]
             await websocket.send_json(
                 {
                     "status": status_text,
