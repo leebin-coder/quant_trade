@@ -197,7 +197,35 @@ def _row_to_tick(row: Iterable[Any]) -> Dict[str, Any]:
     tick_time = tick.get("time")
     if isinstance(tick_time, (datetime, time)):
         tick["time"] = tick_time.strftime("%H:%M:%S")
+    elif isinstance(tick_time, str) and tick_time:
+        tick["time"] = _normalize_time_str(tick_time)
     tick_date = tick.get("date")
     if isinstance(tick_date, (datetime, date)):
         tick["date"] = tick_date.strftime("%Y-%m-%d")
+    elif isinstance(tick_date, str) and tick_date:
+        tick["date"] = _normalize_date_str(tick_date)
     return tick
+
+
+def _normalize_time_str(raw: str) -> str:
+    text = raw.strip()
+    for fmt in ("%H:%M:%S", "%H:%M", "%H%M%S", "%H%M"):
+        try:
+            parsed = datetime.strptime(text, fmt)
+            return parsed.strftime("%H:%M:%S")
+        except ValueError:
+            continue
+    return text
+
+
+def _normalize_date_str(raw: str) -> str:
+    text = raw.strip().replace("/", "-")
+    if len(text) == 8 and text.isdigit():
+        text = f"{text[:4]}-{text[4:6]}-{text[6:]}"
+    for fmt in ("%Y-%m-%d", "%Y%m%d"):
+        try:
+            parsed = datetime.strptime(text, fmt)
+            return parsed.strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+    return text
