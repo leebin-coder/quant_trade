@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import date, datetime, time
+from zoneinfo import ZoneInfo
 from typing import Any, Dict, Iterable, List, Optional
 
 import httpx
@@ -13,6 +14,7 @@ from app.core.config import settings
 from app.utils.logger import logger
 
 router = APIRouter()
+_MARKET_TZ = ZoneInfo(settings.market_timezone)
 
 _TICK_FIELDS = [
     "ts_code",
@@ -104,7 +106,7 @@ async def websocket_ticks(
     history_ticks = _query_ticks(stock_code, trade_date, None)
     last_time = history_ticks[-1]["time"] if history_ticks else None
 
-    status_text = _determine_status(datetime.now())
+    status_text = _determine_status(datetime.now(_MARKET_TZ))
     await websocket.send_json(
         {
             "status": status_text,
@@ -116,7 +118,7 @@ async def websocket_ticks(
     try:
         while True:
             await asyncio.sleep(3)
-            status_text = _determine_status(datetime.now())
+            status_text = _determine_status(datetime.now(_MARKET_TZ))
             latest_ticks: List[Dict[str, Any]] = []
             if status_text == "trading":
                 latest_ticks = _query_ticks(stock_code, trade_date, last_time)

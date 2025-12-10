@@ -72,6 +72,7 @@ class Settings(BaseSettings):
     market_monitor_interval: int = Field(60, env="MARKET_MONITOR_INTERVAL")  # 秒
     strategy_execution_interval: int = Field(300, env="STRATEGY_EXECUTION_INTERVAL")  # 秒
     health_check_interval: int = Field(30, env="HEALTH_CHECK_INTERVAL")  # 秒
+    market_timezone: str = Field("Asia/Shanghai", env="MARKET_TIMEZONE")
 
     class Config:
         env_file = ".env"
