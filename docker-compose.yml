@@ -37,6 +37,28 @@ services:
     networks:
       - quant-network
 
+  quant-trade-ws:
+    build: .
+    container_name: quant-trade-websocket
+    restart: unless-stopped
+    command: >
+      uvicorn app.api:api_app
+      --host 0.0.0.0
+      --port 8000
+    environment:
+      - TZ=Asia/Shanghai
+    env_file:
+      - .env
+    volumes:
+      - ./logs:/app/logs
+      - ./.env:/app/.env
+    ports:
+      - "8000:8000"
+    depends_on:
+      - quant-trade
+    networks:
+      - quant-network
+
 # 网络配置
 networks:
   quant-network:
