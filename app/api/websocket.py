@@ -186,7 +186,7 @@ def _query_ticks(
     try:
         rows = _ch_client.execute(query, params)
     except Exception as exc:
-        logger.error("ClickHouse query failed: %s", exc, exc_info=True)
+        _handle_clickhouse_exception(exc)
         return []
 
     return [_row_to_tick(row) for row in rows]
@@ -229,3 +229,15 @@ def _normalize_date_str(raw: str) -> str:
         except ValueError:
             continue
     return text
+def _handle_clickhouse_exception(exc: Exception) -> None:
+    if hasattr(exc, "code"):
+        logger.error(
+            "ClickHouse query failed (code=%s): %s", getattr(exc, "code", "unknown"), exc
+        )
+        if getattr(exc, "code", None) == 232:  # INCOMPATIBLE_COLUMNS
+            logger.error(
+                "检测到 ClickHouse 字段类型与应用不一致，请核对 "
+                "market_realtime_ticks.date/time 列类型并保持为 Date/DateTime。"
+            )
+    else:
+        logger.error("ClickHouse query failed: %s", exc, exc_info=True)
