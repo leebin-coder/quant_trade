@@ -367,7 +367,6 @@ class RealtimeTickFetcher:
 
             if df is None or df.empty:
                 logger.warning(f"[批次{batch_id:>3}] 第{round_num:>3}次 {current_time} - 未获取到数据")
-                logger.warning(f"{df}")
             else:
                 # 转换为字典列表，保留所有字段
                 tick_data_list = []
