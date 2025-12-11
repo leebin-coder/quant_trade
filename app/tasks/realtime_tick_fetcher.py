@@ -348,102 +348,6 @@ class RealtimeTickFetcher:
         except Exception as e:
             logger.error(f"写入ClickHouse失败: {e}", exc_info=True)
 
-    def fetch_realtime_tick_batch(self, stock_codes: List[str]) -> Optional[List[Dict]]:
-        """
-        获取一批股票的实时tick数据（同步方法，供线程池使用）
-
-        Args:
-            stock_codes: 股票代码列表（最多50只）
-
-        Returns:
-            Optional[List[Dict]]: tick数据列表
-        """
-        try:
-            # 将股票代码列表转换为逗号分隔的字符串
-            ts_codes = ",".join(stock_codes)
-
-            logger.info(f"正在获取 {len(stock_codes)} 只股票的实时数据: {stock_codes[:3]}...")
-
-            # 调用tushare实时行情接口
-            df = ts.realtime_quote(ts_code=ts_codes, src='sina')
-
-            if df is None or df.empty:
-                logger.warning(f"未获取到数据: {stock_codes[:3]}")
-                return None
-
-            # 转换为字典列表，保留所有字段
-            tick_data_list = []
-            for _, row in df.iterrows():
-                # 将整行数据转换为字典
-                tick_data = row.to_dict()
-                tick_data_list.append(tick_data)
-
-            logger.debug(f"成功获取 {len(tick_data_list)} 条实时数据")
-            return tick_data_list
-
-        except Exception as e:
-            logger.error(f"获取实时数据失败: {e}", exc_info=True)
-            return None
-
-    async def fetch_realtime_tick_test(self):
-        """
-        测试版本：仅获取601398.SH的实时tick数据
-        每隔1秒请求一次，持续打印到控制台
-        按Ctrl+C停止
-        """
-        logger.info("=" * 80)
-        logger.info("开始测试实时Tick数据获取（仅601398.SH）...")
-        logger.info("每隔1秒请求一次，按Ctrl+C停止")
-        logger.info(f"执行时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        logger.info("=" * 80)
-
-        test_stock = "601398.SH"
-        request_count = 0
-
-        try:
-            # 在线程池中执行同步的tushare调用
-            loop = asyncio.get_event_loop()
-
-            # 持续循环获取数据
-            while True:
-                request_count += 1
-                current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
-                logger.info(f"\n{'='*80}")
-                logger.info(f"第 {request_count} 次请求 - {current_time}")
-                logger.info(f"{'='*80}")
-
-                with ThreadPoolExecutor(max_workers=1) as executor:
-                    tick_data_list = await loop.run_in_executor(
-                        executor,
-                        self.fetch_realtime_tick_batch,
-                        [test_stock]
-                    )
-
-                if tick_data_list:
-                    for tick_data in tick_data_list:
-                        # 打印所有字段
-                        logger.info(f"\n【{tick_data.get('TS_CODE', 'N/A')} - {tick_data.get('NAME', 'N/A')}】实时数据：")
-                        logger.info("-" * 80)
-
-                        # 按类别打印所有字段
-                        for key, value in sorted(tick_data.items()):
-                            logger.info(f"{key:15} = {value}")
-
-                        logger.info("=" * 80)
-                else:
-                    logger.warning("⚠️  本次未获取到tick数据")
-
-                # 等待1秒后继续下一次请求
-                await asyncio.sleep(1)
-
-        except KeyboardInterrupt:
-            logger.info(f"\n\n{'='*80}")
-            logger.info(f"用户中断，共完成 {request_count} 次请求")
-            logger.info(f"{'='*80}")
-        except Exception as e:
-            logger.error(f"实时Tick数据获取测试失败: {e}", exc_info=True)
-            raise
 
     def fetch_realtime_tick_batch_once(self, stock_codes: List[str], batch_id: int, round_num: int):
         """
@@ -463,6 +367,7 @@ class RealtimeTickFetcher:
 
             if df is None or df.empty:
                 logger.warning(f"[批次{batch_id:>3}] 第{round_num:>3}次 {current_time} - 未获取到数据")
+                logger.warning(f"{df}")
             else:
                 # 转换为字典列表，保留所有字段
                 tick_data_list = []
@@ -481,52 +386,6 @@ class RealtimeTickFetcher:
 
         except Exception as e:
             logger.error(f"[批次{batch_id}] 第{round_num}次 - 获取数据失败: {e}")
-
-    def fetch_realtime_tick_batch_loop(self, stock_codes: List[str], batch_id: int, stop_event):
-        """
-        持续获取一批股票的实时tick数据（同步方法，供线程池使用）
-        每隔3秒请求一次
-
-        Args:
-            stock_codes: 股票代码列表（最多50只）
-            batch_id: 批次ID
-            stop_event: 停止事件
-        """
-        request_count = 0
-
-        while not stop_event.is_set():
-            try:
-                request_count += 1
-                current_time = datetime.now().strftime('%H:%M:%S')
-
-                # 调用tushare实时行情接口
-                ts_codes = ",".join(stock_codes)
-                df = ts.realtime_quote(ts_code=ts_codes, src='sina')
-
-                if df is None or df.empty:
-                    logger.warning(f"[批次{batch_id:>3}] 第{request_count:>3}次 {current_time} - 未获取到数据")
-                else:
-                    # 转换为字典列表，保留所有字段
-                    tick_data_list = []
-                    for _, row in df.iterrows():
-                        tick_data = row.to_dict()
-                        tick_data_list.append(tick_data)
-
-                    logger.debug(
-                        f"[批次{batch_id:>3}] 第{request_count:>3}次获取 {len(tick_data_list)} 条实时数据"
-                    )
-
-                    # 将数据写入 ClickHouse
-                    self.save_tick_data_to_clickhouse(tick_data_list)
-
-            except Exception as e:
-                logger.error(f"[批次{batch_id}] 第{request_count}次 {current_time} - 获取数据失败: {e}")
-
-            # 等待3秒后继续下一次请求
-            if not stop_event.is_set():
-                time_module.sleep(3)
-
-        logger.info(f"[批次{batch_id}] 线程停止，共完成 {request_count} 次请求")
 
     async def check_is_trading_day(self, date_str: str = None) -> bool:
         """
